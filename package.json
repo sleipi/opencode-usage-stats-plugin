@@ -1,0 +1,13 @@
+{
+  "name": "opencode-usage-stats",
+  "version": "0.1.0",
+  "description": "Usage statistics tracking and dashboard for OpenCode",
+  "type": "module",
+  "scripts": {
+    "dashboard": "bun run src/dashboard.ts"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.4.7"
+  },
+  "license": "MIT"
+}
