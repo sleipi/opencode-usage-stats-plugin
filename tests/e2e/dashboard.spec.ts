@@ -7,7 +7,9 @@ test("dashboard page renders seeded data", async ({ page }) => {
     page.getByRole("heading", { name: "OpenCode Usage Stats" }),
   ).toBeVisible();
   await expect(page.getByText("E2E Session")).toBeVisible();
-  await expect(page.getByText("/tmp/e2e-project")).toBeVisible();
+  await expect(
+    page.locator(".session-dir", { hasText: "/tmp/e2e-project" }),
+  ).toBeVisible();
   await expect(page.getByText("Tool Usage")).toBeVisible();
 });
 
