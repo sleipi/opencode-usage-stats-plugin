@@ -40,7 +40,8 @@ export interface ChildSessionRow {
 export interface SessionRepo {
   upsert(data: SessionUpsertData): void;
   upsertFull(data: SessionFullData): void;
-  getRootSessions(): RootSessionRow[];
+  getRootSessions(directory?: string): RootSessionRow[];
   getChildSessions(): ChildSessionRow[];
+  getDistinctDirectories(): string[];
   deleteOrphaned(cutoffDate: string): number;
 }
