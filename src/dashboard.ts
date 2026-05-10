@@ -63,8 +63,8 @@ interface ModeStats {
   provider_id: string | null;
 }
 
-function getStats(repos: Repos): SessionStats[] {
-  const rootSessions = repos.sessions.getRootSessions();
+function getStats(repos: Repos, directory?: string): SessionStats[] {
+  const rootSessions = repos.sessions.getRootSessions(directory ?? undefined);
   const childSessions = repos.sessions.getChildSessions();
   const agentCalls = repos.toolCalls.getAgentCalls();
   const modeRows = repos.messages.getModeStats();
@@ -599,6 +599,8 @@ function renderSessionsFragment(
   daily: DailyTokens[],
   dailyModel: DailyModelTokens[],
   toolGroups: ToolGroupSummary[],
+  directories: string[],
+  selectedDir?: string,
 ): string {
   const bar = renderStatsBar(summary);
   const chart = renderDailyChart(daily);
@@ -619,9 +621,18 @@ function renderSessionsFragment(
       ? '<div class="empty">No sessions recorded yet.</div>'
       : sessions.map(renderSessionCard).join("");
 
+  const dirOptions = directories.map((d) => `<option value="${esc(d)}"${d === selectedDir ? " selected" : ""}>${esc(d)}</option>`).join("");
+  const dirDropdown = `
+    <div class="filter-bar">
+      <select id="dir-filter">
+        <option value="">All directories</option>
+        ${dirOptions}
+      </select>
+    </div>`;
+
   const rightPanel = `
     <div class="right-panel">
-      <div class="right-panel-title">Sessions</div>
+      ${dirDropdown}
       ${sessionCards}
     </div>`;
 
@@ -634,6 +645,8 @@ function renderHTML(
   daily: DailyTokens[],
   dailyModel: DailyModelTokens[],
   toolGroups: ToolGroupSummary[],
+  directories: string[],
+  selectedDir?: string,
 ): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -942,13 +955,28 @@ function renderHTML(
       border-left: 1px solid #21262d;
       padding-left: 24px;
     }
-    .right-panel-title {
-      font-size: 12px; color: #8b949e; text-transform: uppercase;
-      letter-spacing: 0.5px; margin-bottom: 12px;
-    }
     @media (max-width: 1000px) {
       .two-col { flex-direction: column; }
       .left-panel { position: static; }
+    }
+    #dir-filter {
+      appearance: none;
+      -webkit-appearance: none;
+      background: #161b22 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5l3 3 3-3' fill='none' stroke='%238b949e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 12px center;
+      color: #c9d1d9;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 8px 36px 8px 12px;
+      font-size: 13px;
+      font-family: inherit;
+      cursor: pointer;
+      width: 100%;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    #dir-filter:hover { border-color: #484f58; }
+    #dir-filter:focus { outline: none; border-color: #58a6ff; box-shadow: 0 0 0 2px rgba(56,139,253,0.25); }
+    .filter-bar {
+      margin-bottom: 16px;
     }
   </style>
 </head>
@@ -962,7 +990,7 @@ function renderHTML(
     </div>
   </div>
   <div id="sessions">
-    ${renderSessionsFragment(sessions, summary, daily, dailyModel, toolGroups)}
+    ${renderSessionsFragment(sessions, summary, daily, dailyModel, toolGroups, directories, selectedDir)}
   </div>
   <script>
     function collectOpenToolGroups() {
@@ -988,13 +1016,29 @@ function renderHTML(
 
     }
 
+    let currentDirFilter = "";
+
+    function attachDirFilter() {
+      const el = document.getElementById("dir-filter");
+      if (!el) return;
+      el.value = currentDirFilter;
+      el.addEventListener("change", function() {
+        currentDirFilter = el.value;
+        refresh();
+      });
+    }
+
     async function refresh() {
       const start = performance.now();
       const openToolGroups = collectOpenToolGroups();
+      const dirEl = document.getElementById("dir-filter");
+      if (dirEl) currentDirFilter = dirEl.value;
+      const params = currentDirFilter ? "?dir=" + encodeURIComponent(currentDirFilter) : "";
       try {
-        const res = await fetch("/api/stats");
+        const res = await fetch("/api/stats" + params);
         const html = await res.text();
         document.getElementById("sessions").innerHTML = html;
+        attachDirFilter();
         restoreOpenToolGroups(openToolGroups);
         const duration = Math.round(performance.now() - start);
         updateRefreshTiming(duration);
@@ -1019,6 +1063,7 @@ function renderHTML(
       }
     }
     setInterval(refresh, 5000);
+    attachDirFilter();
   </script>
 </body>
 </html>`;
@@ -1105,7 +1150,9 @@ if (import.meta.main) {
           }
 
           try {
-            const sessions = getStats(readRepos);
+            const dirFilter = url.searchParams.get("dir") || undefined;
+            const directories = readRepos.sessions.getDistinctDirectories();
+            const sessions = getStats(readRepos, dirFilter);
             const summary = getTokenSummary(readRepos);
             const daily = getDailyTokens(readRepos);
             const dailyModel = getDailyTokensByModel(readRepos);
@@ -1117,6 +1164,8 @@ if (import.meta.main) {
                 daily,
                 dailyModel,
                 toolGroups,
+                directories,
+                dirFilter,
               ),
               {
                 headers: { "Content-Type": "text/html; charset=utf-8" },
@@ -1129,14 +1178,29 @@ if (import.meta.main) {
           }
         }
 
+        if (url.pathname === "/api/directories") {
+          try {
+            const dirs = readRepos.sessions.getDistinctDirectories();
+            return new Response(JSON.stringify(dirs), {
+              headers: { "Content-Type": "application/json; charset=utf-8" },
+            });
+          } catch (e) {
+            return new Response("[]", {
+              headers: { "Content-Type": "application/json; charset=utf-8" },
+            });
+          }
+        }
+
         try {
-          const sessions = getStats(readRepos);
+          const dirFilter = url.searchParams.get("dir") || undefined;
+          const directories = readRepos.sessions.getDistinctDirectories();
+          const sessions = getStats(readRepos, dirFilter);
           const summary = getTokenSummary(readRepos);
           const daily = getDailyTokens(readRepos);
           const dailyModel = getDailyTokensByModel(readRepos);
           const toolGroups = getToolUsageSummary(readRepos);
           return new Response(
-            renderHTML(sessions, summary, daily, dailyModel, toolGroups),
+            renderHTML(sessions, summary, daily, dailyModel, toolGroups, directories, dirFilter),
             {
               headers: { "Content-Type": "text/html; charset=utf-8" },
             },

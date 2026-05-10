@@ -43,9 +43,8 @@ export class SqliteSessionRepo implements SessionRepo {
     );
   }
 
-  getRootSessions(): RootSessionRow[] {
-    return this.db
-      .prepare(`
+  getRootSessions(directory?: string): RootSessionRow[] {
+    const baseQuery = `
       SELECT
         s.session_id, s.title, s.directory, s.first_seen, s.last_seen,
         COALESCE(SUM(m.input_tokens), 0)       AS input_tokens,
@@ -56,11 +55,24 @@ export class SqliteSessionRepo implements SessionRepo {
         COALESCE(SUM(m.cost), 0)               AS cost
       FROM sessions s
       LEFT JOIN messages m ON m.session_id = s.session_id
-      WHERE s.parent_id IS NULL
-      GROUP BY s.session_id
-      ORDER BY s.last_seen DESC
-    `)
+      WHERE s.parent_id IS NULL`;
+
+    if (directory) {
+      return this.db
+        .prepare(`${baseQuery} AND s.directory = ? GROUP BY s.session_id ORDER BY s.last_seen DESC`)
+        .all(directory) as RootSessionRow[];
+    }
+
+    return this.db
+      .prepare(`${baseQuery} GROUP BY s.session_id ORDER BY s.last_seen DESC`)
       .all() as RootSessionRow[];
+  }
+
+  getDistinctDirectories(): string[] {
+    return this.db
+      .prepare(`SELECT DISTINCT directory FROM sessions WHERE directory IS NOT NULL ORDER BY directory`)
+      .all()
+      .map((row: any) => row.directory as string);
   }
 
   getChildSessions(): ChildSessionRow[] {
