@@ -236,4 +236,12 @@ describe("UsageStatsPlugin hooks", () => {
       } as any),
     ).resolves.toBeUndefined()
   })
+
+  test("plugin exposes expected hook handlers", async () => {
+    const hooks = await mod.UsageStatsPlugin({ project: { id: "project-1" } } as any)
+
+    expect(typeof hooks["chat.params"]).toBe("function")
+    expect(typeof hooks["tool.execute.after"]).toBe("function")
+    expect(typeof hooks.event).toBe("function")
+  })
 })
