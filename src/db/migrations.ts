@@ -1,6 +1,6 @@
-import type { Database } from "bun:sqlite"
+import type { Database } from "bun:sqlite";
 
-type Migration = (db: Database) => void
+type Migration = (db: Database) => void;
 
 export const MIGRATIONS: Migration[] = [
   (db) => {
@@ -18,7 +18,7 @@ export const MIGRATIONS: Migration[] = [
         model_id    TEXT,
         provider_id TEXT
       )
-    `)
+    `);
 
     db.run(`
       CREATE TABLE IF NOT EXISTS messages (
@@ -38,7 +38,7 @@ export const MIGRATIONS: Migration[] = [
         agent         TEXT,
         UNIQUE(session_id, message_id)
       )
-    `)
+    `);
 
     db.run(`
       CREATE TABLE IF NOT EXISTS sessions (
@@ -50,7 +50,7 @@ export const MIGRATIONS: Migration[] = [
         first_seen  TEXT NOT NULL DEFAULT (datetime('now')),
         last_seen   TEXT NOT NULL DEFAULT (datetime('now'))
       )
-    `)
+    `);
 
     db.run(`
       CREATE TABLE IF NOT EXISTS daily_usage (
@@ -62,37 +62,57 @@ export const MIGRATIONS: Migration[] = [
         tool_calls_count  INTEGER NOT NULL DEFAULT 0,
         updated_at        TEXT    NOT NULL DEFAULT (datetime('now'))
       )
-    `)
+    `);
 
-    db.run(`CREATE INDEX IF NOT EXISTS idx_tool_calls_session ON tool_calls(session_id)`)
-    db.run(`CREATE INDEX IF NOT EXISTS idx_tool_calls_tool    ON tool_calls(tool_name)`)
-    db.run(`CREATE INDEX IF NOT EXISTS idx_tool_calls_agent   ON tool_calls(agent_type)`)
-    db.run(`CREATE INDEX IF NOT EXISTS idx_tool_calls_timestamp ON tool_calls(timestamp)`)
-    db.run(`CREATE INDEX IF NOT EXISTS idx_messages_session   ON messages(session_id)`)
-    db.run(`CREATE INDEX IF NOT EXISTS idx_messages_model     ON messages(model_id)`)
-    db.run(`CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp)`)
-    db.run(`CREATE INDEX IF NOT EXISTS idx_sessions_parent    ON sessions(parent_id)`)
-    db.run(`CREATE INDEX IF NOT EXISTS idx_sessions_first_seen ON sessions(first_seen)`)
+    db.run(
+      `CREATE INDEX IF NOT EXISTS idx_tool_calls_session ON tool_calls(session_id)`,
+    );
+    db.run(
+      `CREATE INDEX IF NOT EXISTS idx_tool_calls_tool    ON tool_calls(tool_name)`,
+    );
+    db.run(
+      `CREATE INDEX IF NOT EXISTS idx_tool_calls_agent   ON tool_calls(agent_type)`,
+    );
+    db.run(
+      `CREATE INDEX IF NOT EXISTS idx_tool_calls_timestamp ON tool_calls(timestamp)`,
+    );
+    db.run(
+      `CREATE INDEX IF NOT EXISTS idx_messages_session   ON messages(session_id)`,
+    );
+    db.run(
+      `CREATE INDEX IF NOT EXISTS idx_messages_model     ON messages(model_id)`,
+    );
+    db.run(
+      `CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp)`,
+    );
+    db.run(
+      `CREATE INDEX IF NOT EXISTS idx_sessions_parent    ON sessions(parent_id)`,
+    );
+    db.run(
+      `CREATE INDEX IF NOT EXISTS idx_sessions_first_seen ON sessions(first_seen)`,
+    );
   },
-]
+];
 
 export function getSchemaVersion(): number {
-  return MIGRATIONS.length
+  return MIGRATIONS.length;
 }
 
 export function migrate(db: Database): void {
-  const versionRow = db.prepare("PRAGMA user_version").get() as { user_version?: number }
-  const currentVersion = Number(versionRow?.user_version ?? 0)
+  const versionRow = db.prepare("PRAGMA user_version").get() as {
+    user_version?: number;
+  };
+  const currentVersion = Number(versionRow?.user_version ?? 0);
 
   for (let i = currentVersion; i < MIGRATIONS.length; i++) {
-    db.run("BEGIN IMMEDIATE")
+    db.run("BEGIN IMMEDIATE");
     try {
-      MIGRATIONS[i](db)
-      db.run(`PRAGMA user_version = ${i + 1}`)
-      db.run("COMMIT")
+      MIGRATIONS[i]?.(db);
+      db.run(`PRAGMA user_version = ${i + 1}`);
+      db.run("COMMIT");
     } catch (e) {
-      db.run("ROLLBACK")
-      throw new Error(`Migration v${i} to v${i + 1} failed: ${String(e)}`)
+      db.run("ROLLBACK");
+      throw new Error(`Migration v${i} to v${i + 1} failed: ${String(e)}`);
     }
   }
 }

@@ -4,86 +4,91 @@
  * Run: bun run ~/.config/opencode/plugins/usage-stats-dashboard.ts
  * Open: http://localhost:3333
  */
-import { join } from "path"
-import type { DailyModelTokens, DailyTokens, Repos, TokenSummary, ToolGroupSummary } from "./db/interfaces"
-import { createSqliteRepos, gcOldData } from "./db/sqlite-repository"
+import { join } from "node:path";
+import type { DailyModelTokens, TokenSummary } from "./db/message/message-repo";
+import type { Repos } from "./db/repos";
+import type { DailyTokens } from "./db/shared-types";
+import { createSqliteRepos, gcOldData } from "./db/sqlite-repository";
+import type { ToolGroupSummary } from "./db/tool-call/tool-call-repo";
 
-const DB_PATH = process.env.OPENCODE_USAGE_STATS_DB || join(process.env.HOME || "~", ".config", "opencode", "usage-stats.db")
-const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3333
+const DB_PATH =
+  process.env.OPENCODE_USAGE_STATS_DB ||
+  join(process.env.HOME || "~", ".config", "opencode", "usage-stats.db");
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3333;
 
 // Track last aggregation time to avoid running too often
-let lastAggregation = 0
-const MIN_AGGREGATION_INTERVAL_MS = 60_000 // 60 seconds
+let lastAggregation = 0;
+const MIN_AGGREGATION_INTERVAL_MS = 60_000; // 60 seconds
 
 // Track last GC time
-let lastGC = 0
-const MIN_GC_INTERVAL_MS = 24 * 60 * 60 * 1000 // 24 hours
+let lastGC = 0;
+const MIN_GC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 interface SessionStats {
-  session_id: string
-  title: string | null
-  directory: string | null
-  first_seen: string
-  last_seen: string
-  input_tokens: number
-  output_tokens: number
-  reasoning_tokens: number
-  cache_read_tokens: number
-  cache_write_tokens: number
-  cost: number
-  agents: AgentStats[]
-  modes: ModeStats[]
+  session_id: string;
+  title: string | null;
+  directory: string | null;
+  first_seen: string;
+  last_seen: string;
+  input_tokens: number;
+  output_tokens: number;
+  reasoning_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost: number;
+  agents: AgentStats[];
+  modes: ModeStats[];
 }
 
 interface AgentStats {
-  agent_type: string
-  call_count: number
-  input_tokens: number
-  output_tokens: number
-  reasoning_tokens: number
-  cache_read_tokens: number
-  model_id: string | null
-  provider_id: string | null
+  agent_type: string;
+  call_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  reasoning_tokens: number;
+  cache_read_tokens: number;
+  model_id: string | null;
+  provider_id: string | null;
 }
 
 interface ModeStats {
-  agent: string
-  message_count: number
-  input_tokens: number
-  output_tokens: number
-  reasoning_tokens: number
-  cache_read_tokens: number
-  cost: number
-  model_id: string | null
-  provider_id: string | null
+  agent: string;
+  message_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  reasoning_tokens: number;
+  cache_read_tokens: number;
+  cost: number;
+  model_id: string | null;
+  provider_id: string | null;
 }
 
 function getStats(repos: Repos): SessionStats[] {
-  const rootSessions = repos.sessions.getRootSessions()
-  const childSessions = repos.sessions.getChildSessions()
-  const agentCalls = repos.toolCalls.getAgentCalls()
-  const modeRows = repos.messages.getModeStats()
+  const rootSessions = repos.sessions.getRootSessions();
+  const childSessions = repos.sessions.getChildSessions();
+  const agentCalls = repos.toolCalls.getAgentCalls();
+  const modeRows = repos.messages.getModeStats();
 
   // Map: parent_id -> child sessions
-  const childMap = new Map<string, any[]>()
+  const childMap = new Map<string, any[]>();
   for (const c of childSessions) {
-    if (!c.parent_id) continue
-    if (!childMap.has(c.parent_id)) childMap.set(c.parent_id, [])
-    childMap.get(c.parent_id)!.push(c)
+    if (!c.parent_id) continue;
+    if (!childMap.has(c.parent_id)) childMap.set(c.parent_id, []);
+    childMap.get(c.parent_id)?.push(c);
   }
 
   // Map: parent_session_id -> { agent_type -> call_count }
-  const agentMap = new Map<string, Map<string, number>>()
+  const agentMap = new Map<string, Map<string, number>>();
   for (const a of agentCalls) {
-    if (!agentMap.has(a.session_id)) agentMap.set(a.session_id, new Map())
-    agentMap.get(a.session_id)!.set(a.agent_type, a.call_count)
+    if (!agentMap.has(a.session_id)) agentMap.set(a.session_id, new Map());
+    agentMap.get(a.session_id)?.set(a.agent_type, a.call_count);
   }
 
   // Map: session_id -> ModeStats[]
-  const modeMap = new Map<string, ModeStats[]>()
+  const modeMap = new Map<string, ModeStats[]>();
   for (const m of modeRows) {
-    if (!modeMap.has(m.session_id)) modeMap.set(m.session_id, [])
-    modeMap.get(m.session_id)!.push({
+    if (!modeMap.has(m.session_id)) modeMap.set(m.session_id, []);
+    modeMap.get(m.session_id)?.push({
       agent: m.agent,
       message_count: m.message_count,
       input_tokens: m.input_tokens,
@@ -93,31 +98,31 @@ function getStats(repos: Repos): SessionStats[] {
       cost: m.cost,
       model_id: m.model_id ?? null,
       provider_id: m.provider_id ?? null,
-    })
+    });
   }
 
   return rootSessions.map((s) => {
-    const children = childMap.get(s.session_id) || []
-    const agentCallCounts = agentMap.get(s.session_id) || new Map()
+    const children = childMap.get(s.session_id) || [];
+    const agentCallCounts = agentMap.get(s.session_id) || new Map();
 
     // Build agent details from child sessions
     // Extract agent_type from child title pattern: "... (@agent-type subagent)"
-    const agentDetails: AgentStats[] = []
-    const seenAgents = new Map<string, AgentStats>()
+    const agentDetails: AgentStats[] = [];
+    const seenAgents = new Map<string, AgentStats>();
 
     for (const child of children) {
       // Parse agent type from title like "PM says Ja (@product-manager subagent)"
-      const match = child.title?.match(/@(\S+)\s+subagent/)
-      const agentType = match?.[1] ?? "subagent"
+      const match = child.title?.match(/@(\S+)\s+subagent/);
+      const agentType = match?.[1] ?? "subagent";
 
       if (seenAgents.has(agentType)) {
         // Aggregate multiple calls of same agent type
-        const existing = seenAgents.get(agentType)!
-        existing.call_count += 1
-        existing.input_tokens += child.input_tokens
-        existing.output_tokens += child.output_tokens
-        existing.reasoning_tokens += child.reasoning_tokens
-        existing.cache_read_tokens += child.cache_read_tokens
+        const existing = seenAgents.get(agentType)!;
+        existing.call_count += 1;
+        existing.input_tokens += child.input_tokens;
+        existing.output_tokens += child.output_tokens;
+        existing.reasoning_tokens += child.reasoning_tokens;
+        existing.cache_read_tokens += child.cache_read_tokens;
       } else {
         const stats: AgentStats = {
           agent_type: agentType,
@@ -128,16 +133,16 @@ function getStats(repos: Repos): SessionStats[] {
           cache_read_tokens: child.cache_read_tokens,
           model_id: child.model_id,
           provider_id: child.provider_id,
-        }
-        seenAgents.set(agentType, stats)
-        agentDetails.push(stats)
+        };
+        seenAgents.set(agentType, stats);
+        agentDetails.push(stats);
       }
     }
 
     // Override call_count from tool_calls if available (more accurate)
     for (const agent of agentDetails) {
-      const count = agentCallCounts.get(agent.agent_type)
-      if (count) agent.call_count = count
+      const count = agentCallCounts.get(agent.agent_type);
+      if (count) agent.call_count = count;
     }
 
     // Add agents from tool_calls that have no child sessions yet (no token data)
@@ -152,15 +157,21 @@ function getStats(repos: Repos): SessionStats[] {
           cache_read_tokens: 0,
           model_id: null,
           provider_id: null,
-        })
+        });
       }
     }
 
     // Total = own tokens + all child tokens
-    const childIn = agentDetails.reduce((sum, a) => sum + a.input_tokens, 0)
-    const childOut = agentDetails.reduce((sum, a) => sum + a.output_tokens, 0)
-    const childReasoning = agentDetails.reduce((sum, a) => sum + a.reasoning_tokens, 0)
-    const childCache = agentDetails.reduce((sum, a) => sum + a.cache_read_tokens, 0)
+    const childIn = agentDetails.reduce((sum, a) => sum + a.input_tokens, 0);
+    const childOut = agentDetails.reduce((sum, a) => sum + a.output_tokens, 0);
+    const childReasoning = agentDetails.reduce(
+      (sum, a) => sum + a.reasoning_tokens,
+      0,
+    );
+    const childCache = agentDetails.reduce(
+      (sum, a) => sum + a.cache_read_tokens,
+      0,
+    );
 
     return {
       session_id: s.session_id,
@@ -176,107 +187,144 @@ function getStats(repos: Repos): SessionStats[] {
       cost: s.cost,
       agents: agentDetails,
       modes: modeMap.get(s.session_id) || [],
-    }
-  })
+    };
+  });
 }
 
 function getTokenSummary(repos: Repos): TokenSummary {
-  return repos.messages.getTokenSummary()
+  return repos.messages.getTokenSummary();
 }
 
 function getDailyTokens(repos: Repos): DailyTokens[] {
-  const today = new Date().toISOString().slice(0, 10)
-  const todayRow = repos.messages.getTodayTokens(today)
+  const today = new Date().toISOString().slice(0, 10);
+  const todayRow = repos.messages.getTodayTokens(today);
 
-  const historyRows = repos.dailyUsage.getHistoryUntil(today, 60)
+  const historyRows = repos.dailyUsage.getHistoryUntil(today, 60);
 
   // Merge and fill gaps
-  const dataMap = new Map<string, number>()
-  for (const row of historyRows) dataMap.set(row.date, row.total)
-  dataMap.set(todayRow.date, todayRow.total)
+  const dataMap = new Map<string, number>();
+  for (const row of historyRows) dataMap.set(row.date, row.total);
+  dataMap.set(todayRow.date, todayRow.total);
 
-  const result: DailyTokens[] = []
+  const result: DailyTokens[] = [];
   for (let i = 59; i >= 0; i--) {
-    const d = new Date()
-    d.setDate(d.getDate() - i)
-    const key = d.toISOString().slice(0, 10)
-    result.push({ date: key, total: dataMap.get(key) ?? 0 })
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    result.push({ date: key, total: dataMap.get(key) ?? 0 });
   }
 
-  return result
+  return result;
 }
 
 function getDailyTokensByModel(repos: Repos): DailyModelTokens[] {
-  return repos.messages.getDailyTokensByModel()
+  return repos.messages.getDailyTokensByModel();
 }
 
 function fmt(n: number): string {
-  return n.toLocaleString("de-DE")
+  return n.toLocaleString("de-DE");
 }
 
 export function fmtCompact(n: number): string {
   if (n >= 1_000_000) {
-    const m = n / 1_000_000
-    return m % 1 === 0 ? `${Math.round(m)}m` : `${m.toFixed(1)}m`
+    const m = n / 1_000_000;
+    return m % 1 === 0 ? `${Math.round(m)}m` : `${m.toFixed(1)}m`;
   }
   if (n >= 1_000) {
-    const k = n / 1_000
-    return k % 1 === 0 ? `${Math.round(k)}k` : `${k.toFixed(1)}k`
+    const k = n / 1_000;
+    return k % 1 === 0 ? `${Math.round(k)}k` : `${k.toFixed(1)}k`;
   }
-  return n.toString()
+  return n.toString();
 }
 
 export function esc(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
-export function renderTokens(input: number, cache: number, output: number, reasoning: number): string {
-  const totalIn = input + cache
-  const cachePercent = totalIn > 0 ? Math.round((cache / totalIn) * 100) : 0
-  const cacheInfo = cache > 0 ? ` <span class="token-cache">(${cachePercent}% cached)<span class="info-icon" title="Cache-Read-Tokens: Input-Tokens die der Provider aus seinem Prompt-Cache liest statt neu zu verarbeiten. In langen Konversationen bleibt der bisherige Kontext (System-Prompt, vorherige Nachrichten, Tool-Outputs) gecached. Das ist schneller und günstiger (bis zu 90% Rabatt bei Anthropic).">?</span></span>` : ""
+export function renderTokens(
+  input: number,
+  cache: number,
+  output: number,
+  reasoning: number,
+): string {
+  const totalIn = input + cache;
+  const cachePercent = totalIn > 0 ? Math.round((cache / totalIn) * 100) : 0;
+  const cacheInfo =
+    cache > 0
+      ? ` <span class="token-cache">(${cachePercent}% cached)<span class="info-icon" title="Cache-Read-Tokens: Input-Tokens die der Provider aus seinem Prompt-Cache liest statt neu zu verarbeiten. In langen Konversationen bleibt der bisherige Kontext (System-Prompt, vorherige Nachrichten, Tool-Outputs) gecached. Das ist schneller und günstiger (bis zu 90% Rabatt bei Anthropic).">?</span></span>`
+      : "";
 
-  let html = `<span class="token-in">${fmtCompact(totalIn)} in</span>${cacheInfo}`
-  html += ` <span class="token-sep">/</span> <span class="token-out">${fmtCompact(output)} out</span>`
+  let html = `<span class="token-in">${fmtCompact(totalIn)} in</span>${cacheInfo}`;
+  html += ` <span class="token-sep">/</span> <span class="token-out">${fmtCompact(output)} out</span>`;
   if (reasoning > 0) {
-    html += ` <span class="token-sep">/</span> <span class="token-reasoning">${fmtCompact(reasoning)} reasoning</span>`
+    html += ` <span class="token-sep">/</span> <span class="token-reasoning">${fmtCompact(reasoning)} reasoning</span>`;
   }
-  return html
+  return html;
 }
 
 function renderSessionCard(s: SessionStats): string {
-  const title = s.title || s.directory?.split("/").pop() || s.session_id
-  const time = s.last_seen?.replace("T", " ").slice(0, 16) ?? ""
+  const title = s.title || s.directory?.split("/").pop() || s.session_id;
+  const time = s.last_seen?.replace("T", " ").slice(0, 16) ?? "";
 
-  const agentRows = s.agents.map((a) => {
-    const agentTokens = renderTokens(a.input_tokens, a.cache_read_tokens, a.output_tokens, a.reasoning_tokens)
-    const model = a.model_id ? `<span class="agent-model">${esc(a.model_id)}</span>` : ""
-    return `
+  const agentRows = s.agents
+    .map((a) => {
+      const agentTokens = renderTokens(
+        a.input_tokens,
+        a.cache_read_tokens,
+        a.output_tokens,
+        a.reasoning_tokens,
+      );
+      const model = a.model_id
+        ? `<span class="agent-model">${esc(a.model_id)}</span>`
+        : "";
+      return `
       <div class="agent-row">
         <span class="agent-badge">${esc(a.agent_type)}</span>
         <span class="agent-calls">${a.call_count}x</span>
         ${model}
         <span class="tokens-detail">${agentTokens}</span>
-      </div>`
-  }).join("")
+      </div>`;
+    })
+    .join("");
 
-  const sessionTokens = renderTokens(s.input_tokens, s.cache_read_tokens, s.output_tokens, s.reasoning_tokens)
+  const sessionTokens = renderTokens(
+    s.input_tokens,
+    s.cache_read_tokens,
+    s.output_tokens,
+    s.reasoning_tokens,
+  );
 
-  const modeRows = s.modes.map((m) => {
-    const modeTokens = renderTokens(m.input_tokens, m.cache_read_tokens, m.output_tokens, m.reasoning_tokens)
-    const label = m.agent.charAt(0).toUpperCase() + m.agent.slice(1)
-    const modelInfo = m.provider_id || m.model_id
-      ? ` <span class="mode-model">${esc([m.provider_id, m.model_id].filter(Boolean).join(" / "))}</span>`
-      : ""
-    const costStr = m.cost > 0 ? ` <span class="mode-cost">$${m.cost.toFixed(4)}</span>` : ""
-    return `
+  const modeRows = s.modes
+    .map((m) => {
+      const modeTokens = renderTokens(
+        m.input_tokens,
+        m.cache_read_tokens,
+        m.output_tokens,
+        m.reasoning_tokens,
+      );
+      const label = m.agent.charAt(0).toUpperCase() + m.agent.slice(1);
+      const modelInfo =
+        m.provider_id || m.model_id
+          ? ` <span class="mode-model">${esc([m.provider_id, m.model_id].filter(Boolean).join(" / "))}</span>`
+          : "";
+      const costStr =
+        m.cost > 0
+          ? ` <span class="mode-cost">$${m.cost.toFixed(4)}</span>`
+          : "";
+      return `
       <div class="mode-row">
         <span class="mode-badge mode-${esc(m.agent)}">${esc(label)}</span>
         ${modelInfo}
         <span class="mode-msgs">${m.message_count} msgs</span>
         <span class="tokens-detail">${modeTokens}</span>
         ${costStr}
-      </div>`
-  }).join("")
+      </div>`;
+    })
+    .join("");
 
   return `
     <div class="session-card">
@@ -294,7 +342,7 @@ function renderSessionCard(s: SessionStats): string {
       </div>
       ${agentRows ? `<div class="agents-section"><div class="agents-label">Agents</div>${agentRows}</div>` : ""}
       ${modeRows ? `<div class="agents-section"><div class="agents-label">Mode</div>${modeRows}</div>` : ""}
-    </div>`
+    </div>`;
 }
 
 function renderStatsBar(summary: TokenSummary): string {
@@ -305,52 +353,57 @@ function renderStatsBar(summary: TokenSummary): string {
       <span class="stats-pair"><span class="stats-label">This Week:</span><span class="stats-value">${fmtCompact(summary.thisWeek)}</span></span>
       <span class="stats-pair"><span class="stats-label">This Month:</span><span class="stats-value">${fmtCompact(summary.thisMonth)}</span></span>
       <span class="stats-pair"><span class="stats-label">Last Month:</span><span class="stats-value">${fmtCompact(summary.lastMonth)}</span></span>
-    </div>`
+    </div>`;
 }
 
 function renderDailyChart(daily: DailyTokens[]): string {
   // Build a map from DB data
-  const dataMap = new Map<string, number>()
-  for (const d of daily) dataMap.set(d.date, d.total)
+  const dataMap = new Map<string, number>();
+  for (const d of daily) dataMap.set(d.date, d.total);
 
   // Always render 60 days
-  const days: { date: string; total: number }[] = []
+  const days: { date: string; total: number }[] = [];
   for (let i = 59; i >= 0; i--) {
-    const d = new Date()
-    d.setDate(d.getDate() - i)
-    const key = d.toISOString().slice(0, 10)
-    days.push({ date: key, total: dataMap.get(key) ?? 0 })
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    days.push({ date: key, total: dataMap.get(key) ?? 0 });
   }
 
-  const max = Math.max(...days.map(d => d.total))
+  const max = Math.max(...days.map((d) => d.total));
 
-  const bars = days.map(d => {
-    const pct = max > 0 && d.total > 0 ? Math.max(1, Math.round((d.total / max) * 100)) : 0
-    // Format date as "Mon, 09 May"
-    const dateObj = new Date(d.date + "T00:00:00")
-    const weekday = dateObj.toLocaleDateString("en-US", { weekday: "short" })
-    const day = String(dateObj.getDate()).padStart(2, "0")
-    const month = dateObj.toLocaleDateString("en-US", { month: "short" })
-    const tooltipDate = `${weekday}, ${day} ${month}`
-    const tooltipTokens = fmt(d.total)
-    return `
+  const bars = days
+    .map((d) => {
+      const pct =
+        max > 0 && d.total > 0
+          ? Math.max(1, Math.round((d.total / max) * 100))
+          : 0;
+      // Format date as "Mon, 09 May"
+      const dateObj = new Date(`${d.date}T00:00:00`);
+      const weekday = dateObj.toLocaleDateString("en-US", { weekday: "short" });
+      const day = String(dateObj.getDate()).padStart(2, "0");
+      const month = dateObj.toLocaleDateString("en-US", { month: "short" });
+      const tooltipDate = `${weekday}, ${day} ${month}`;
+      const tooltipTokens = fmt(d.total);
+      return `
       <div class="chart-col">
-        ${d.total > 0 ? `<div class="chart-value">${d.total >= 1000 ? Math.round(d.total / 1000) + "k" : d.total}</div>` : ""}
+        ${d.total > 0 ? `<div class="chart-value">${d.total >= 1000 ? `${Math.round(d.total / 1000)}k` : d.total}</div>` : ""}
         <div class="chart-bar" style="height: ${pct}%"></div>
         <div class="chart-tooltip">${tooltipDate}<br>${tooltipTokens} tokens</div>
-      </div>`
-  }).join("")
+      </div>`;
+    })
+    .join("");
 
   // Compute 5-day rolling average
-  const avgPoints: { x: number; y: number }[] = []
+  const avgPoints: { x: number; y: number }[] = [];
   for (let i = 0; i < days.length; i++) {
-    const window = days.slice(Math.max(0, i - 4), i + 1)
-    const avg = window.reduce((s, d) => s + d.total, 0) / window.length
-    const xPct = ((i + 0.5) / days.length) * 100
-    const yPct = max > 0 ? 100 - (avg / max) * 100 : 100
-    avgPoints.push({ x: xPct, y: yPct })
+    const window = days.slice(Math.max(0, i - 4), i + 1);
+    const avg = window.reduce((s, d) => s + d.total, 0) / window.length;
+    const xPct = ((i + 0.5) / days.length) * 100;
+    const yPct = max > 0 ? 100 - (avg / max) * 100 : 100;
+    avgPoints.push({ x: xPct, y: yPct });
   }
-  const polyline = avgPoints.map(p => `${p.x},${p.y}`).join(" ")
+  const polyline = avgPoints.map((p) => `${p.x},${p.y}`).join(" ");
 
   return `
     <div class="daily-chart">
@@ -365,85 +418,102 @@ function renderDailyChart(daily: DailyTokens[]): string {
         <span class="legend-item"><span class="legend-bar"></span>Daily tokens</span>
         <span class="legend-item"><span class="legend-line"></span>5-day avg</span>
       </div>
-    </div>`
+    </div>`;
 }
 
 const MODEL_COLORS = [
-  "#58a6ff", "#3fb950", "#d2a8ff", "#f0883e", "#f85149",
-  "#79c0ff", "#56d364", "#e3b341", "#bc8cff", "#ff7b72",
-]
+  "#58a6ff",
+  "#3fb950",
+  "#d2a8ff",
+  "#f0883e",
+  "#f85149",
+  "#79c0ff",
+  "#56d364",
+  "#e3b341",
+  "#bc8cff",
+  "#ff7b72",
+];
 
 function renderDailyModelChart(modelData: DailyModelTokens[]): string {
   // Collect all unique models (sorted by total usage desc for consistent legend order)
-  const modelTotals = new Map<string, number>()
+  const modelTotals = new Map<string, number>();
   for (const d of modelData) {
-    modelTotals.set(d.model, (modelTotals.get(d.model) ?? 0) + d.total)
+    modelTotals.set(d.model, (modelTotals.get(d.model) ?? 0) + d.total);
   }
   const models = [...modelTotals.entries()]
     .sort((a, b) => b[1] - a[1])
-    .map(([m]) => m)
+    .map(([m]) => m);
 
-  const colorMap = new Map<string, string>()
-  models.forEach((m, i) => colorMap.set(m, MODEL_COLORS[i % MODEL_COLORS.length]))
+  const colorMap = new Map<string, string>();
+  for (const [i, m] of models.entries()) {
+    colorMap.set(m, MODEL_COLORS[i % MODEL_COLORS.length]!);
+  }
 
   // Build map: date -> { model -> total }
-  const dataMap = new Map<string, Map<string, number>>()
+  const dataMap = new Map<string, Map<string, number>>();
   for (const d of modelData) {
-    if (!dataMap.has(d.date)) dataMap.set(d.date, new Map())
-    dataMap.get(d.date)!.set(d.model, d.total)
+    if (!dataMap.has(d.date)) dataMap.set(d.date, new Map());
+    dataMap.get(d.date)?.set(d.model, d.total);
   }
 
   // 60 days
-  const days: { date: string; byModel: Map<string, number>; total: number }[] = []
+  const days: { date: string; byModel: Map<string, number>; total: number }[] =
+    [];
   for (let i = 59; i >= 0; i--) {
-    const dt = new Date()
-    dt.setDate(dt.getDate() - i)
-    const key = dt.toISOString().slice(0, 10)
-    const byModel = dataMap.get(key) ?? new Map()
-    const total = [...byModel.values()].reduce((s, v) => s + v, 0)
-    days.push({ date: key, byModel, total })
+    const dt = new Date();
+    dt.setDate(dt.getDate() - i);
+    const key = dt.toISOString().slice(0, 10);
+    const byModel = dataMap.get(key) ?? new Map();
+    const total = [...byModel.values()].reduce((s, v) => s + v, 0);
+    days.push({ date: key, byModel, total });
   }
 
-  const max = Math.max(...days.map(d => d.total), 1)
+  const max = Math.max(...days.map((d) => d.total), 1);
 
-  const bars = days.map(d => {
-    const dateObj = new Date(d.date + "T00:00:00")
-    const weekday = dateObj.toLocaleDateString("en-US", { weekday: "short" })
-    const day = String(dateObj.getDate()).padStart(2, "0")
-    const month = dateObj.toLocaleDateString("en-US", { month: "short" })
-    const tooltipDate = `${weekday}, ${day} ${month}`
+  const bars = days
+    .map((d) => {
+      const dateObj = new Date(`${d.date}T00:00:00`);
+      const weekday = dateObj.toLocaleDateString("en-US", { weekday: "short" });
+      const day = String(dateObj.getDate()).padStart(2, "0");
+      const month = dateObj.toLocaleDateString("en-US", { month: "short" });
+      const tooltipDate = `${weekday}, ${day} ${month}`;
 
-    // Stacked segments (bottom to top = models array order)
-    const segments = models.map(m => {
-      const val = d.byModel.get(m) ?? 0
-      if (val === 0) return ""
-      const pct = (val / max) * 100
-      const color = colorMap.get(m)!
-      return `<div class="model-bar-seg" style="height:${pct}%;background:${color}"></div>`
-    }).join("")
+      // Stacked segments (bottom to top = models array order)
+      const segments = models
+        .map((m) => {
+          const val = d.byModel.get(m) ?? 0;
+          if (val === 0) return "";
+          const pct = (val / max) * 100;
+          const color = colorMap.get(m)!;
+          return `<div class="model-bar-seg" style="height:${pct}%;background:${color}"></div>`;
+        })
+        .join("");
 
-    // Tooltip breakdown
-    const tooltipLines = models
-      .filter(m => (d.byModel.get(m) ?? 0) > 0)
-      .map(m => {
-        const color = colorMap.get(m)!
-        return `<span style="color:${color}">\u25A0</span> ${esc(m)}: ${fmt(d.byModel.get(m)!)}`
-      })
-      .join("<br>")
+      // Tooltip breakdown
+      const tooltipLines = models
+        .filter((m) => (d.byModel.get(m) ?? 0) > 0)
+        .map((m) => {
+          const color = colorMap.get(m)!;
+          return `<span style="color:${color}">\u25A0</span> ${esc(m)}: ${fmt(d.byModel.get(m)!)}`;
+        })
+        .join("<br>");
 
-    return `
+      return `
       <div class="chart-col">
         <div class="model-bar-stack" style="height:${max > 0 && d.total > 0 ? Math.max(1, Math.round((d.total / max) * 100)) : 0}%">
           ${segments}
         </div>
         <div class="chart-tooltip">${tooltipDate}<br>${tooltipLines}</div>
-      </div>`
-  }).join("")
+      </div>`;
+    })
+    .join("");
 
-  const legend = models.map(m => {
-    const color = colorMap.get(m)!
-    return `<span class="legend-item"><span class="legend-bar" style="background:${color}"></span>${esc(m)}</span>`
-  }).join("")
+  const legend = models
+    .map((m) => {
+      const color = colorMap.get(m)!;
+      return `<span class="legend-item"><span class="legend-bar" style="background:${color}"></span>${esc(m)}</span>`;
+    })
+    .join("");
 
   return `
     <div class="daily-chart">
@@ -454,35 +524,45 @@ function renderDailyModelChart(modelData: DailyModelTokens[]): string {
       <div class="chart-legend">
         ${legend}
       </div>
-    </div>`
+    </div>`;
 }
 
 function getToolUsageSummary(repos: Repos): ToolGroupSummary[] {
-  return repos.toolCalls.getToolUsageSummary()
+  return repos.toolCalls.getToolUsageSummary();
 }
 
 function renderToolUsage(groups: ToolGroupSummary[]): string {
-  if (groups.length === 0) return ""
+  if (groups.length === 0) return "";
 
-  const visibleGroups = groups.filter(g => g.agent !== null)
+  const visibleGroups = groups.filter((g) => g.agent !== null);
 
-  const groupsHtml = visibleGroups.map((g) => {
-    const label = g.agent ? g.agent.charAt(0).toUpperCase() + g.agent.slice(1) : "Unknown"
-    const modelInfo = [g.provider_id, g.model_id].filter(Boolean).join(" / ") || "unknown"
-    const totalCalls = g.tools.reduce((s, t) => s + t.thisMonth + t.lastMonth, 0)
-    const groupKey = `${g.agent ?? "__none__"}|${g.provider_id ?? "__none__"}|${g.model_id ?? "__none__"}`
+  const groupsHtml = visibleGroups
+    .map((g) => {
+      const label = g.agent
+        ? g.agent.charAt(0).toUpperCase() + g.agent.slice(1)
+        : "Unknown";
+      const modelInfo =
+        [g.provider_id, g.model_id].filter(Boolean).join(" / ") || "unknown";
+      const totalCalls = g.tools.reduce(
+        (s, t) => s + t.thisMonth + t.lastMonth,
+        0,
+      );
+      const groupKey = `${g.agent ?? "__none__"}|${g.provider_id ?? "__none__"}|${g.model_id ?? "__none__"}`;
 
-    const toolRows = g.tools.map((t) => `
+      const toolRows = g.tools
+        .map(
+          (t) => `
       <div class="tool-row">
         <span class="tool-name">${esc(t.tool_name)}</span>
         <span class="stats-pair"><span class="stats-label">Today:</span><span class="stats-value">${fmt(t.today)}</span></span>
         <span class="stats-pair"><span class="stats-label">This Week:</span><span class="stats-value">${fmt(t.thisWeek)}</span></span>
         <span class="stats-pair"><span class="stats-label">This Month:</span><span class="stats-value">${fmt(t.thisMonth)}</span></span>
         <span class="stats-pair"><span class="stats-label">Last Month:</span><span class="stats-value">${fmt(t.lastMonth)}</span></span>
-      </div>`
-    ).join("")
+      </div>`,
+        )
+        .join("");
 
-    return `
+      return `
       <details class="tool-group" data-group-key="${esc(groupKey)}">
         <summary class="tool-group-header">
           <span class="mode-badge mode-${esc(g.agent ?? "unknown")}">${esc(label)}</span>
@@ -490,14 +570,15 @@ function renderToolUsage(groups: ToolGroupSummary[]): string {
           <span class="tool-group-total">${fmt(totalCalls)} calls</span>
         </summary>
         <div class="tool-group-body">${toolRows}</div>
-      </details>`
-  }).join("")
+      </details>`;
+    })
+    .join("");
 
   return `
     <div class="tool-usage-section">
       <div class="chart-title">Tool Usage</div>
       ${groupsHtml}
-    </div>`
+    </div>`;
 }
 
 function renderSessionsFragment(
@@ -507,10 +588,10 @@ function renderSessionsFragment(
   dailyModel: DailyModelTokens[],
   toolGroups: ToolGroupSummary[],
 ): string {
-  const bar = renderStatsBar(summary)
-  const chart = renderDailyChart(daily)
-  const modelChart = renderDailyModelChart(dailyModel)
-  const toolUsage = renderToolUsage(toolGroups)
+  const bar = renderStatsBar(summary);
+  const chart = renderDailyChart(daily);
+  const modelChart = renderDailyModelChart(dailyModel);
+  const toolUsage = renderToolUsage(toolGroups);
 
   const leftPanel = `
     <div class="left-panel">
@@ -519,22 +600,29 @@ function renderSessionsFragment(
       ${chart}
       ${modelChart}
       ${toolUsage}
-    </div>`
+    </div>`;
 
-  const sessionCards = sessions.length === 0
-    ? '<div class="empty">No sessions recorded yet.</div>'
-    : sessions.map(renderSessionCard).join("")
+  const sessionCards =
+    sessions.length === 0
+      ? '<div class="empty">No sessions recorded yet.</div>'
+      : sessions.map(renderSessionCard).join("");
 
   const rightPanel = `
     <div class="right-panel">
       <div class="right-panel-title">Sessions</div>
       ${sessionCards}
-    </div>`
+    </div>`;
 
-  return `<div class="two-col">${leftPanel}${rightPanel}</div>`
+  return `<div class="two-col">${leftPanel}${rightPanel}</div>`;
 }
 
-function renderHTML(sessions: SessionStats[], summary: TokenSummary, daily: DailyTokens[], dailyModel: DailyModelTokens[], toolGroups: ToolGroupSummary[]): string {
+function renderHTML(
+  sessions: SessionStats[],
+  summary: TokenSummary,
+  daily: DailyTokens[],
+  dailyModel: DailyModelTokens[],
+  toolGroups: ToolGroupSummary[],
+): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -911,111 +999,133 @@ function renderHTML(sessions: SessionStats[], summary: TokenSummary, daily: Dail
     setInterval(refresh, 5000);
   </script>
 </body>
-</html>`
+</html>`;
 }
 
 async function isPortInUse(port: number): Promise<boolean> {
   try {
-    const response = await fetch(`http://localhost:${port}/`, { signal: AbortSignal.timeout(500) })
-    await response.text()
-    return true
+    const response = await fetch(`http://localhost:${port}/`, {
+      signal: AbortSignal.timeout(500),
+    });
+    await response.text();
+    return true;
   } catch {
-    return false
+    return false;
   }
 }
 
 if (import.meta.main) {
-  const portBusy = await isPortInUse(PORT)
+  const portBusy = await isPortInUse(PORT);
   if (!portBusy) {
     // Initial aggregation on dashboard startup
     try {
-      const repos = createSqliteRepos(DB_PATH)
-      const today = new Date().toISOString().slice(0, 10)
-      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-      repos.dailyUsage.recompute(sevenDaysAgo, today)
-      lastAggregation = Date.now()
+      const repos = createSqliteRepos(DB_PATH);
+      const today = new Date().toISOString().slice(0, 10);
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(0, 10);
+      repos.dailyUsage.recompute(sevenDaysAgo, today);
+      lastAggregation = Date.now();
 
       // Run GC on startup
-      gcOldData(repos, 90)
-      lastGC = Date.now()
+      gcOldData(repos, 90);
+      lastGC = Date.now();
 
-      repos.close()
+      repos.close();
     } catch (e) {
-      console.error("Initial aggregation/GC failed:", e)
+      console.error("Initial aggregation/GC failed:", e);
     }
 
-    const readRepos = createSqliteRepos(DB_PATH, { readonly: true })
+    const readRepos = createSqliteRepos(DB_PATH, { readonly: true });
 
     Bun.serve({
       port: PORT,
       async fetch(req) {
-        const url = new URL(req.url)
+        const url = new URL(req.url);
 
         if (url.pathname === "/api/stats") {
           // 1/100 chance to trigger aggregation (with 60s minimum interval)
           if (Math.random() < 0.01) {
-            const now = Date.now()
+            const now = Date.now();
             if (now - lastAggregation >= MIN_AGGREGATION_INTERVAL_MS) {
-              lastAggregation = now
+              lastAggregation = now;
               try {
-                const repos = createSqliteRepos(DB_PATH)
-                const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-                const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-                repos.dailyUsage.recompute(sevenDaysAgo, yesterday)
-                repos.close()
+                const repos = createSqliteRepos(DB_PATH);
+                const sevenDaysAgo = new Date(
+                  Date.now() - 7 * 24 * 60 * 60 * 1000,
+                )
+                  .toISOString()
+                  .slice(0, 10);
+                const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000)
+                  .toISOString()
+                  .slice(0, 10);
+                repos.dailyUsage.recompute(sevenDaysAgo, yesterday);
+                repos.close();
               } catch (e) {
-                console.error("Background aggregation failed:", e)
+                console.error("Background aggregation failed:", e);
               }
             }
           }
 
           // 1/500 chance to trigger GC (with 24h minimum interval)
           if (Math.random() < 0.002) {
-            const now = Date.now()
+            const now = Date.now();
             if (now - lastGC >= MIN_GC_INTERVAL_MS) {
-              lastGC = now
+              lastGC = now;
               try {
-                const repos = createSqliteRepos(DB_PATH)
-                gcOldData(repos, 90)
-                repos.close()
+                const repos = createSqliteRepos(DB_PATH);
+                gcOldData(repos, 90);
+                repos.close();
               } catch (e) {
-                console.error("Background GC failed:", e)
+                console.error("Background GC failed:", e);
               }
             }
           }
 
           try {
-            const sessions = getStats(readRepos)
-            const summary = getTokenSummary(readRepos)
-            const daily = getDailyTokens(readRepos)
-            const dailyModel = getDailyTokensByModel(readRepos)
-            const toolGroups = getToolUsageSummary(readRepos)
-            return new Response(renderSessionsFragment(sessions, summary, daily, dailyModel, toolGroups), {
-              headers: { "Content-Type": "text/html; charset=utf-8" },
-            })
+            const sessions = getStats(readRepos);
+            const summary = getTokenSummary(readRepos);
+            const daily = getDailyTokens(readRepos);
+            const dailyModel = getDailyTokensByModel(readRepos);
+            const toolGroups = getToolUsageSummary(readRepos);
+            return new Response(
+              renderSessionsFragment(
+                sessions,
+                summary,
+                daily,
+                dailyModel,
+                toolGroups,
+              ),
+              {
+                headers: { "Content-Type": "text/html; charset=utf-8" },
+              },
+            );
           } catch (e) {
             return new Response(`<div class="empty">DB error: ${e}</div>`, {
               headers: { "Content-Type": "text/html; charset=utf-8" },
-            })
+            });
           }
         }
 
         try {
-          const sessions = getStats(readRepos)
-          const summary = getTokenSummary(readRepos)
-          const daily = getDailyTokens(readRepos)
-          const dailyModel = getDailyTokensByModel(readRepos)
-          const toolGroups = getToolUsageSummary(readRepos)
-          return new Response(renderHTML(sessions, summary, daily, dailyModel, toolGroups), {
-            headers: { "Content-Type": "text/html; charset=utf-8" },
-          })
+          const sessions = getStats(readRepos);
+          const summary = getTokenSummary(readRepos);
+          const daily = getDailyTokens(readRepos);
+          const dailyModel = getDailyTokensByModel(readRepos);
+          const toolGroups = getToolUsageSummary(readRepos);
+          return new Response(
+            renderHTML(sessions, summary, daily, dailyModel, toolGroups),
+            {
+              headers: { "Content-Type": "text/html; charset=utf-8" },
+            },
+          );
         } catch (e) {
-          return new Response(`DB error: ${e}`, { status: 500 })
+          return new Response(`DB error: ${e}`, { status: 500 });
         }
       },
-    })
-    console.log(`Dashboard running at http://localhost:${PORT}`)
+    });
+    console.log(`Dashboard running at http://localhost:${PORT}`);
   } else {
-    console.log(`Dashboard already running on port ${PORT}, skipping.`)
+    console.log(`Dashboard already running on port ${PORT}, skipping.`);
   }
 }

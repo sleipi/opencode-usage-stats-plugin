@@ -1,17 +1,20 @@
-import type { Repos } from "../db/interfaces"
-import type { SessionContext } from "../context/session-context"
+import type { SessionContext } from "../context/session-context";
+import type { Repos } from "../db/repos";
 import {
-  isMessageUpdatedEvent,
-  isSessionEvent,
   type EventEnvelope,
   type EventHandler,
-} from "./types"
+  isMessageUpdatedEvent,
+  isSessionEvent,
+} from "./types";
 
-export function createEventHandler(context: SessionContext, repos: Repos): EventHandler {
+export function createEventHandler(
+  context: SessionContext,
+  repos: Repos,
+): EventHandler {
   return async ({ event }: EventEnvelope): Promise<void> => {
     try {
       if (isSessionEvent(event)) {
-        const session = event.properties?.info
+        const session = event.properties?.info;
         if (session?.id) {
           repos.sessions.upsertFull({
             sessionId: session.id,
@@ -19,19 +22,19 @@ export function createEventHandler(context: SessionContext, repos: Repos): Event
             parentId: session.parentID ?? null,
             title: session.title ?? null,
             directory: session.directory ?? null,
-          })
+          });
         }
-        return
+        return;
       }
 
       if (isMessageUpdatedEvent(event)) {
-        const msg = event.properties?.info
-        if (!msg || msg.role !== "assistant") return
+        const msg = event.properties?.info;
+        if (!msg || msg.role !== "assistant") return;
 
         repos.sessions.upsert({
           sessionId: msg.sessionID,
           projectId: context.getProjectId(),
-        })
+        });
 
         repos.messages.upsert({
           sessionId: msg.sessionID,
@@ -46,10 +49,10 @@ export function createEventHandler(context: SessionContext, repos: Repos): Event
           cacheWriteTokens: msg.tokens?.cache?.write ?? 0,
           cost: msg.cost ?? 0,
           agent: context.getAgent(msg.sessionID),
-        })
+        });
       }
     } catch {
       // Ignore write errors from telemetry plugin
     }
-  }
+  };
 }

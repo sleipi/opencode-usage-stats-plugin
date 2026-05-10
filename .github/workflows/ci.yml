@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  pull_request:
+  release:
+    types: [published]
+
+jobs:
+  quality:
+    name: Lint, Typecheck & Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - name: Biome (lint + format)
+        run: bun x biome check .
+
+      - name: Typecheck
+        run: bun x tsc --noEmit
+
+      - name: Unit Tests
+        run: bun test tests/unit
+
+  e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: bunx playwright install --with-deps
+
+      - name: Run E2E tests
+        run: bunx playwright test

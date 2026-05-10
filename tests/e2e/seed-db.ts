@@ -1,17 +1,17 @@
-import { mkdirSync, rmSync } from "fs"
-import { dirname } from "path"
-import { Database } from "bun:sqlite"
+import { Database } from "bun:sqlite";
+import { mkdirSync, rmSync } from "node:fs";
+import { dirname } from "node:path";
 
-const dbPath = process.env.OPENCODE_USAGE_STATS_DB
+const dbPath = process.env.OPENCODE_USAGE_STATS_DB;
 
 if (!dbPath) {
-  throw new Error("OPENCODE_USAGE_STATS_DB is required")
+  throw new Error("OPENCODE_USAGE_STATS_DB is required");
 }
 
-mkdirSync(dirname(dbPath), { recursive: true })
-rmSync(dbPath, { force: true })
+mkdirSync(dirname(dbPath), { recursive: true });
+rmSync(dbPath, { force: true });
 
-const db = new Database(dbPath)
+const db = new Database(dbPath);
 
 db.run(`
   CREATE TABLE IF NOT EXISTS sessions (
@@ -23,7 +23,7 @@ db.run(`
     first_seen  TEXT NOT NULL DEFAULT (datetime('now')),
     last_seen   TEXT NOT NULL DEFAULT (datetime('now'))
   )
-`)
+`);
 
 db.run(`
   CREATE TABLE IF NOT EXISTS messages (
@@ -43,7 +43,7 @@ db.run(`
     agent         TEXT,
     UNIQUE(session_id, message_id)
   )
-`)
+`);
 
 db.run(`
   CREATE TABLE IF NOT EXISTS tool_calls (
@@ -59,7 +59,7 @@ db.run(`
     model_id    TEXT,
     provider_id TEXT
   )
-`)
+`);
 
 db.run(`
   CREATE TABLE IF NOT EXISTS daily_usage (
@@ -71,7 +71,7 @@ db.run(`
     tool_calls_count  INTEGER NOT NULL DEFAULT 0,
     updated_at        TEXT    NOT NULL DEFAULT (datetime('now'))
   )
-`)
+`);
 
 db.prepare(`
   INSERT INTO sessions (session_id, title, directory, first_seen, last_seen)
@@ -82,7 +82,7 @@ db.prepare(`
   "/tmp/e2e-project",
   "2026-05-10 10:00:00",
   "2026-05-10 10:10:00",
-)
+);
 
 db.prepare(`
   INSERT INTO messages
@@ -101,7 +101,7 @@ db.prepare(`
   600,
   0.25,
   "build",
-)
+);
 
 db.prepare(`
   INSERT INTO tool_calls (timestamp, session_id, call_id, tool_name, agent_type, description, agent, model_id, provider_id)
@@ -116,11 +116,11 @@ db.prepare(`
   "build",
   "gpt-5.3-codex",
   "github-copilot",
-)
+);
 
 db.prepare(`
   INSERT INTO daily_usage (day, tokens_total, sessions_count, messages_count, tool_calls_count)
   VALUES (?, ?, ?, ?, ?)
-`).run("2026-05-10", 2200, 1, 1, 1)
+`).run("2026-05-10", 2200, 1, 1, 1);
 
-db.close()
+db.close();
