@@ -7,7 +7,9 @@ Bun is required — the plugin uses `bun:sqlite` (zero-dependency SQLite). Node.
 ## Commands
 
 - `bun install` — install deps
-- `bun run dashboard` — start dashboard server on localhost:3333
+- `bun run dashboard` — start dashboard server on localhost:3333 (`--watch` auto-restarts on file changes)
+- Port `3333` is also used by OpenCode itself; for local testing/dev, prefer a different port (for example: `PORT=3334 bun run dashboard`).
+- For agent-driven testing, run dashboard commands in the background to avoid blocking the shell (for example: `PORT=3334 bun run dashboard &`).
 
 No tests, linter, or CI are configured.
 

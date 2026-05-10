@@ -359,10 +359,10 @@ function renderTokens(input: number, cache: number, output: number, reasoning: n
   const cachePercent = totalIn > 0 ? Math.round((cache / totalIn) * 100) : 0
   const cacheInfo = cache > 0 ? ` <span class="token-cache">(${cachePercent}% cached)<span class="info-icon" title="Cache-Read-Tokens: Input-Tokens die der Provider aus seinem Prompt-Cache liest statt neu zu verarbeiten. In langen Konversationen bleibt der bisherige Kontext (System-Prompt, vorherige Nachrichten, Tool-Outputs) gecached. Das ist schneller und günstiger (bis zu 90% Rabatt bei Anthropic).">?</span></span>` : ""
 
-  let html = `<span class="token-in">${fmt(totalIn)} in</span>${cacheInfo}`
-  html += ` <span class="token-sep">/</span> <span class="token-out">${fmt(output)} out</span>`
+  let html = `<span class="token-in">${fmtCompact(totalIn)} in</span>${cacheInfo}`
+  html += ` <span class="token-sep">/</span> <span class="token-out">${fmtCompact(output)} out</span>`
   if (reasoning > 0) {
-    html += ` <span class="token-sep">/</span> <span class="token-reasoning">${fmt(reasoning)} reasoning</span>`
+    html += ` <span class="token-sep">/</span> <span class="token-reasoning">${fmtCompact(reasoning)} reasoning</span>`
   }
   return html
 }
@@ -581,65 +581,185 @@ function renderDailyModelChart(modelData: DailyModelTokens[]): string {
     </div>`
 }
 
-interface ModeSummary {
-  agent: string
+interface ToolGroupSummary {
+  agent: string | null
+  provider_id: string | null
+  model_id: string | null
+  latest_timestamp: string | null
+  tools: ToolCountSummary[]
+}
+
+interface ToolCountSummary {
+  tool_name: string
   today: number
   thisWeek: number
   thisMonth: number
   lastMonth: number
 }
 
-function getModeSummaries(): ModeSummary[] {
+function getToolUsageSummary(): ToolGroupSummary[] {
   const db = new Database(DB_PATH, { readonly: true })
   db.run("PRAGMA busy_timeout = 3000")
 
-  const agents = db.prepare(`
-    SELECT DISTINCT agent FROM messages WHERE agent IS NOT NULL
-  `).all() as { agent: string }[]
-
-  const sum = (agent: string, where: string) => {
-    const row = db.prepare(`
-      SELECT COALESCE(SUM(input_tokens + cache_read_tokens + output_tokens + reasoning_tokens), 0) AS total
-      FROM messages WHERE agent = ? AND ${where}
-    `).get(agent) as any
-    return row?.total ?? 0
+  const timeFilters = {
+    today: "date(tc.timestamp) = date('now')",
+    thisWeek: "tc.timestamp >= date('now', 'weekday 1', '-7 days')",
+    thisMonth: "tc.timestamp >= date('now', 'start of month')",
+    lastMonth: "tc.timestamp >= date('now', 'start of month', '-1 month') AND tc.timestamp < date('now', 'start of month')",
   }
 
-  const results: ModeSummary[] = agents.map(({ agent }) => ({
-    agent,
-    today: sum(agent, "date(timestamp) = date('now')"),
-    thisWeek: sum(agent, "timestamp >= date('now', 'weekday 1', '-7 days')"),
-    thisMonth: sum(agent, "timestamp >= date('now', 'start of month')"),
-    lastMonth: sum(agent, "timestamp >= date('now', 'start of month', '-1 month') AND timestamp < date('now', 'start of month')"),
-  }))
+  // Get all distinct groups — fall back to messages table for model/provider if tool_calls has NULL
+  const groups = db.prepare(`
+    SELECT DISTINCT
+      COALESCE(tc.agent,
+        (SELECT m.agent FROM messages m WHERE m.session_id = tc.session_id AND m.agent IS NOT NULL ORDER BY m.timestamp DESC LIMIT 1),
+        '__none__') AS agent,
+      COALESCE(tc.provider_id,
+        (SELECT m.provider_id FROM messages m WHERE m.session_id = tc.session_id AND m.provider_id IS NOT NULL ORDER BY m.timestamp DESC LIMIT 1),
+        '__none__') AS provider_id,
+      COALESCE(tc.model_id,
+        (SELECT m.model_id FROM messages m WHERE m.session_id = tc.session_id AND m.model_id IS NOT NULL ORDER BY m.timestamp DESC LIMIT 1),
+        '__none__') AS model_id
+    FROM tool_calls tc
+    ORDER BY agent, provider_id, model_id
+  `).all() as { agent: string; provider_id: string; model_id: string }[]
+
+  const results: ToolGroupSummary[] = []
+
+  for (const group of groups) {
+    const agentVal = group.agent === "__none__" ? null : group.agent
+    const providerVal = group.provider_id === "__none__" ? null : group.provider_id
+    const modelVal = group.model_id === "__none__" ? null : group.model_id
+
+    // Build WHERE that matches the same fallback logic used in grouping
+    const agentFilter = agentVal === null
+      ? `tc.agent IS NULL AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.session_id = tc.session_id AND m.agent IS NOT NULL)`
+      : `COALESCE(tc.agent, (SELECT m.agent FROM messages m WHERE m.session_id = tc.session_id AND m.agent IS NOT NULL ORDER BY m.timestamp DESC LIMIT 1)) = '${agentVal}'`
+    const providerFilter = providerVal === null
+      ? `tc.provider_id IS NULL AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.session_id = tc.session_id AND m.provider_id IS NOT NULL)`
+      : `COALESCE(tc.provider_id, (SELECT m.provider_id FROM messages m WHERE m.session_id = tc.session_id AND m.provider_id IS NOT NULL ORDER BY m.timestamp DESC LIMIT 1)) = '${providerVal}'`
+    const modelFilter = modelVal === null
+      ? `tc.model_id IS NULL AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.session_id = tc.session_id AND m.model_id IS NOT NULL)`
+      : `COALESCE(tc.model_id, (SELECT m.model_id FROM messages m WHERE m.session_id = tc.session_id AND m.model_id IS NOT NULL ORDER BY m.timestamp DESC LIMIT 1)) = '${modelVal}'`
+    const groupWhere = `${agentFilter} AND ${providerFilter} AND ${modelFilter}`
+
+    // Get tool counts for each time period
+    const toolRows: Record<string, ToolCountSummary> = {}
+
+    for (const [period, timeWhere] of Object.entries(timeFilters)) {
+      const rows = db.prepare(`
+        SELECT tc.tool_name, COUNT(*) AS cnt
+        FROM tool_calls tc
+        WHERE ${groupWhere} AND ${timeWhere}
+        GROUP BY tc.tool_name
+      `).all() as { tool_name: string; cnt: number }[]
+
+      for (const row of rows) {
+        if (!toolRows[row.tool_name]) {
+          toolRows[row.tool_name] = { tool_name: row.tool_name, today: 0, thisWeek: 0, thisMonth: 0, lastMonth: 0 }
+        }
+        toolRows[row.tool_name][period as keyof Omit<ToolCountSummary, "tool_name">] = row.cnt
+      }
+    }
+
+    const tools = Object.values(toolRows).sort((a, b) => (b.thisMonth + b.lastMonth) - (a.thisMonth + a.lastMonth))
+    const latestRow = db.prepare(`
+      SELECT MAX(tc.timestamp) AS latest_timestamp
+      FROM tool_calls tc
+      WHERE ${groupWhere}
+    `).get() as { latest_timestamp: string | null }
+
+    if (tools.length > 0) {
+      results.push({
+        agent: group.agent === "__none__" ? null : group.agent,
+        provider_id: group.provider_id === "__none__" ? null : group.provider_id,
+        model_id: group.model_id === "__none__" ? null : group.model_id,
+        latest_timestamp: latestRow?.latest_timestamp ?? null,
+        tools,
+      })
+    }
+  }
 
   db.close()
+
+  // Sort groups: newest activity first, then by total calls
+  results.sort((a, b) => {
+    const latestA = a.latest_timestamp ? Date.parse(a.latest_timestamp) : 0
+    const latestB = b.latest_timestamp ? Date.parse(b.latest_timestamp) : 0
+    if (latestA !== latestB) return latestB - latestA
+    const totalA = a.tools.reduce((s, t) => s + t.thisMonth + t.lastMonth, 0)
+    const totalB = b.tools.reduce((s, t) => s + t.thisMonth + t.lastMonth, 0)
+    return totalB - totalA
+  })
+
   return results
 }
 
-function renderModeSummaries(modes: ModeSummary[]): string {
-  if (modes.length === 0) return ""
+function renderToolUsage(groups: ToolGroupSummary[]): string {
+  if (groups.length === 0) return ""
 
-  return modes.map((m) => {
-    const label = m.agent.charAt(0).toUpperCase() + m.agent.slice(1)
+  const visibleGroups = groups.filter(g => g.agent !== null)
+
+  const groupsHtml = visibleGroups.map((g) => {
+    const label = g.agent ? g.agent.charAt(0).toUpperCase() + g.agent.slice(1) : "Unknown"
+    const modelInfo = [g.provider_id, g.model_id].filter(Boolean).join(" / ") || "unknown"
+    const totalCalls = g.tools.reduce((s, t) => s + t.thisMonth + t.lastMonth, 0)
+    const groupKey = `${g.agent ?? "__none__"}|${g.provider_id ?? "__none__"}|${g.model_id ?? "__none__"}`
+
+    const toolRows = g.tools.map((t) => `
+      <div class="tool-row">
+        <span class="tool-name">${esc(t.tool_name)}</span>
+        <span class="stats-pair"><span class="stats-label">Today:</span><span class="stats-value">${fmt(t.today)}</span></span>
+        <span class="stats-pair"><span class="stats-label">This Week:</span><span class="stats-value">${fmt(t.thisWeek)}</span></span>
+        <span class="stats-pair"><span class="stats-label">This Month:</span><span class="stats-value">${fmt(t.thisMonth)}</span></span>
+        <span class="stats-pair"><span class="stats-label">Last Month:</span><span class="stats-value">${fmt(t.lastMonth)}</span></span>
+      </div>`
+    ).join("")
+
     return `
-    <div class="stats-bar mode-stats-bar">
-      <span class="stats-badge"><span class="mode-badge mode-${esc(m.agent)}">${esc(label)}</span></span>
-      <span class="stats-pair"><span class="stats-label">Today:</span><span class="stats-value">${fmtCompact(m.today)}</span></span>
-      <span class="stats-pair"><span class="stats-label">This Week:</span><span class="stats-value">${fmtCompact(m.thisWeek)}</span></span>
-      <span class="stats-pair"><span class="stats-label">This Month:</span><span class="stats-value">${fmtCompact(m.thisMonth)}</span></span>
-      <span class="stats-pair"><span class="stats-label">Last Month:</span><span class="stats-value">${fmtCompact(m.lastMonth)}</span></span>
-    </div>`
+      <details class="tool-group" data-group-key="${esc(groupKey)}">
+        <summary class="tool-group-header">
+          <span class="mode-badge mode-${esc(g.agent ?? "unknown")}">${esc(label)}</span>
+          <span class="tool-group-model">${esc(modelInfo)}</span>
+          <span class="tool-group-total">${fmt(totalCalls)} calls</span>
+        </summary>
+        <div class="tool-group-body">${toolRows}</div>
+      </details>`
   }).join("")
+
+  return `
+    <div class="tool-usage-section">
+      <div class="chart-title">Tool Usage</div>
+      ${groupsHtml}
+    </div>`
 }
 
-function renderSessionsFragment(sessions: SessionStats[], summary: TokenSummary, daily: DailyTokens[], modeSummaries: ModeSummary[], dailyModel: DailyModelTokens[]): string {
+function renderSessionsFragment(sessions: SessionStats[], summary: TokenSummary, daily: DailyTokens[], dailyModel: DailyModelTokens[]): string {
   const bar = renderStatsBar(summary)
-  const modeStats = renderModeSummaries(modeSummaries)
   const chart = renderDailyChart(daily)
   const modelChart = renderDailyModelChart(dailyModel)
-  if (sessions.length === 0) return bar + modeStats + '<hr class="section-divider">' + chart + modelChart + '<div class="empty">No sessions recorded yet.</div>'
-  return bar + modeStats + '<hr class="section-divider">' + chart + modelChart + sessions.map(renderSessionCard).join("")
+  const toolUsage = renderToolUsage(getToolUsageSummary())
+
+  const leftPanel = `
+    <div class="left-panel">
+      ${bar}
+      <hr class="section-divider">
+      ${chart}
+      ${modelChart}
+      ${toolUsage}
+    </div>`
+
+  const sessionCards = sessions.length === 0
+    ? '<div class="empty">No sessions recorded yet.</div>'
+    : sessions.map(renderSessionCard).join("")
+
+  const rightPanel = `
+    <div class="right-panel">
+      <div class="right-panel-title">Sessions</div>
+      ${sessionCards}
+    </div>`
+
+  return `<div class="two-col">${leftPanel}${rightPanel}</div>`
 }
 
 function renderHTML(sessions: SessionStats[], summary: TokenSummary, daily: DailyTokens[]): string {
@@ -656,7 +776,7 @@ function renderHTML(sessions: SessionStats[], summary: TokenSummary, daily: Dail
       background: #0d1117;
       color: #c9d1d9;
       padding: 24px;
-      max-width: 900px;
+      max-width: none;
       margin: 0 auto;
     }
     .header {
@@ -810,6 +930,38 @@ function renderHTML(sessions: SessionStats[], summary: TokenSummary, daily: Dail
       margin: 16px 0;
     }
     .mode-overall { color: #58a6ff; border-color: #1f6feb; }
+    .tool-usage-section { margin-bottom: 8px; }
+    .tool-group {
+      margin-bottom: 12px;
+      border: 1px solid #21262d;
+      border-radius: 8px;
+      background: #161b22;
+    }
+    .tool-group-header {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 10px;
+      cursor: pointer;
+      list-style: none;
+    }
+    .tool-group-header::-webkit-details-marker { display: none; }
+    .tool-group-model { font-size: 11px; color: #484f58; }
+    .tool-group-total { margin-left: auto; font-size: 11px; color: #8b949e; }
+    .tool-group-body { padding: 0 10px 8px 10px; }
+    .tool-row {
+      display: grid;
+      grid-template-columns: 190px repeat(4, 160px);
+      align-items: center;
+      padding: 3px 0; font-size: 12px;
+      margin-bottom: 2px;
+      white-space: nowrap;
+    }
+    .tool-name {
+      justify-self: start;
+      background: #1f2937; border: 1px solid #30363d;
+      border-radius: 4px; padding: 1px 8px;
+      font-size: 12px; color: #8b949e; white-space: nowrap;
+    }
+    .tool-row .stats-pair { width: 160px; flex-shrink: 0; }
     .daily-chart {
       margin-bottom: 24px; padding-bottom: 16px;
       border-bottom: 1px solid #21262d;
@@ -893,6 +1045,29 @@ function renderHTML(sessions: SessionStats[], summary: TokenSummary, daily: Dail
     .model-bar-seg {
       width: 100%; min-height: 0;
     }
+    .two-col {
+      display: flex; gap: 24px; align-items: flex-start;
+    }
+    .left-panel {
+      flex: 1; min-width: 0;
+      position: sticky; top: 24px; align-self: flex-start;
+      background: rgba(255, 255, 255, 0.02);
+      border-radius: 8px;
+      padding: 16px 24px 16px 16px;
+    }
+    .right-panel {
+      flex: 1; min-width: 0;
+      border-left: 1px solid #21262d;
+      padding-left: 24px;
+    }
+    .right-panel-title {
+      font-size: 12px; color: #8b949e; text-transform: uppercase;
+      letter-spacing: 0.5px; margin-bottom: 12px;
+    }
+    @media (max-width: 1000px) {
+      .two-col { flex-direction: column; }
+      .left-panel { position: static; }
+    }
   </style>
 </head>
 <body>
@@ -905,15 +1080,40 @@ function renderHTML(sessions: SessionStats[], summary: TokenSummary, daily: Dail
     </div>
   </div>
   <div id="sessions">
-    ${renderSessionsFragment(sessions, summary, daily, getModeSummaries(), getDailyTokensByModel())}
+    ${renderSessionsFragment(sessions, summary, daily, getDailyTokensByModel())}
   </div>
   <script>
+    function collectOpenToolGroups() {
+      const open = new Set();
+      document.querySelectorAll('.tool-group[data-group-key]').forEach((el) => {
+        if (el.open) {
+          const key = el.getAttribute('data-group-key');
+          if (key) open.add(key);
+        }
+      });
+      return open;
+    }
+
+    function restoreOpenToolGroups(openKeys) {
+      const groups = document.querySelectorAll('.tool-group[data-group-key]');
+      let opened = 0;
+      groups.forEach((el) => {
+        const key = el.getAttribute('data-group-key');
+        const shouldOpen = !!key && openKeys.has(key);
+        el.open = shouldOpen;
+        if (shouldOpen) opened += 1;
+      });
+
+    }
+
     async function refresh() {
       const start = performance.now();
+      const openToolGroups = collectOpenToolGroups();
       try {
         const res = await fetch("/api/stats");
         const html = await res.text();
         document.getElementById("sessions").innerHTML = html;
+        restoreOpenToolGroups(openToolGroups);
         const duration = Math.round(performance.now() - start);
         updateRefreshTiming(duration);
       } catch {
@@ -1010,7 +1210,7 @@ if (!portBusy) {
         }
 
         try {
-          return new Response(renderSessionsFragment(getStats(), getTokenSummary(), getDailyTokens(), getModeSummaries(), getDailyTokensByModel()), {
+          return new Response(renderSessionsFragment(getStats(), getTokenSummary(), getDailyTokens(), getDailyTokensByModel()), {
             headers: { "Content-Type": "text/html; charset=utf-8" },
           })
         } catch (e) {

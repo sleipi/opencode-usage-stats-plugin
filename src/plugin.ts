@@ -61,6 +61,11 @@ export function initDB(): Database {
   // Migrate: add agent column to messages
   try { db.run(`ALTER TABLE messages ADD COLUMN agent TEXT`) } catch { /* already exists */ }
 
+  // Migrate: add agent, model_id, provider_id to tool_calls
+  for (const col of ["agent TEXT", "model_id TEXT", "provider_id TEXT"]) {
+    try { db.run(`ALTER TABLE tool_calls ADD COLUMN ${col}`) } catch { /* already exists */ }
+  }
+
   db.run(`CREATE INDEX IF NOT EXISTS idx_tool_calls_session ON tool_calls(session_id)`)
   db.run(`CREATE INDEX IF NOT EXISTS idx_tool_calls_tool    ON tool_calls(tool_name)`)
   db.run(`CREATE INDEX IF NOT EXISTS idx_tool_calls_agent   ON tool_calls(agent_type)`)
@@ -206,8 +211,8 @@ export const UsageStatsPlugin: Plugin = async (ctx) => {
   gcOldData(db, 90)
 
   const insertCall = db.prepare(`
-    INSERT OR IGNORE INTO tool_calls (session_id, call_id, tool_name, agent_type, description)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT OR IGNORE INTO tool_calls (session_id, call_id, tool_name, agent_type, description, agent, model_id, provider_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `)
 
   const upsertSession = db.prepare(`
@@ -247,12 +252,21 @@ export const UsageStatsPlugin: Plugin = async (ctx) => {
 
   // Track the current agent mode per session (e.g. "plan", "build")
   const sessionAgentMap = new Map<string, string>()
+  // Track the current model/provider per session
+  const sessionModelMap = new Map<string, { model_id: string; provider_id: string }>()
 
   return {
     "chat.params": async (input, _output) => {
       // Track the agent mode (e.g. "plan", "build") for this session
       if (input.agent) {
         sessionAgentMap.set(input.sessionID, input.agent)
+      }
+      // Track model/provider for this session
+      if (input.modelID || input.providerID) {
+        sessionModelMap.set(input.sessionID, {
+          model_id: (input as any).modelID ?? "",
+          provider_id: (input as any).providerID ?? "",
+        })
       }
     },
 
@@ -264,10 +278,15 @@ export const UsageStatsPlugin: Plugin = async (ctx) => {
         : null
 
       const description = args?.description ? String(args.description) : null
+      const agent = sessionAgentMap.get(input.sessionID) ?? null
+      const modelInfo = sessionModelMap.get(input.sessionID)
 
       try {
         upsertSession.run(input.sessionID, projectId)
-        insertCall.run(input.sessionID, input.callID, input.tool, agentType, description)
+        insertCall.run(
+          input.sessionID, input.callID, input.tool, agentType, description,
+          agent, modelInfo?.model_id ?? null, modelInfo?.provider_id ?? null,
+        )
       } catch { /* ignore */ }
     },
 
