@@ -266,9 +266,21 @@ export function renderTokens(
   return html;
 }
 
+function recencyClass(lastSeen: string | null | undefined): string {
+  if (!lastSeen) return "";
+  const iso = lastSeen.replace(" ", "T") + "Z";
+  const ageSec = (Date.now() - Date.parse(iso)) / 1000;
+  if (Number.isNaN(ageSec) || ageSec < 0) return "";
+  if (ageSec < 30) return "session-card--active";
+  if (ageSec < 120) return "session-card--recent";
+  if (ageSec < 600) return "session-card--idle";
+  return "";
+}
+
 function renderSessionCard(s: SessionStats): string {
   const title = s.title || s.directory?.split("/").pop() || s.session_id;
   const time = s.last_seen?.replace("T", " ").slice(0, 16) ?? "";
+  const recency = recencyClass(s.last_seen);
 
   const agentRows = s.agents
     .map((a) => {
@@ -327,7 +339,7 @@ function renderSessionCard(s: SessionStats): string {
     .join("");
 
   return `
-    <div class="session-card">
+    <div class="session-card${recency ? ` ${recency}` : ""}">
       <div class="session-header">
         <div class="session-title">${esc(title)}</div>
         <div class="session-time">${time}</div>
@@ -687,6 +699,16 @@ function renderHTML(
       transition: border-color 0.2s;
     }
     .session-card:hover { border-color: #388bfd; }
+    .session-card--active {
+      border-color: #56d364;
+      box-shadow: 0 0 0 1px #56d364, 0 0 12px rgba(86, 211, 100, 0.35);
+    }
+    .session-card--recent {
+      border-color: #3fb950;
+    }
+    .session-card--idle {
+      border-color: #1a4d1f;
+    }
     .session-header {
       display: flex; justify-content: space-between;
       align-items: center; margin-bottom: 4px;
