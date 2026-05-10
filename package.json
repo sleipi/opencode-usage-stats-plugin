@@ -4,10 +4,14 @@
   "description": "Usage statistics tracking and dashboard for OpenCode",
   "type": "module",
   "scripts": {
-    "dashboard": "bun run src/dashboard.ts"
+    "dashboard": "bun --watch run src/dashboard.ts"
   },
   "dependencies": {
     "@opencode-ai/plugin": "^1.4.7"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "playwright": "^1.59.1"
+  }
 }

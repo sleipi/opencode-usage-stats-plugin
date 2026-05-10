@@ -6,9 +6,18 @@
  */
 import { Database } from "bun:sqlite"
 import { join } from "path"
+import { recomputeDailyUsage, gcOldData } from "./plugin"
 
 const DB_PATH = join(process.env.HOME || "~", ".config", "opencode", "usage-stats.db")
-const PORT = 3333
+const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3333
+
+// Track last aggregation time to avoid running too often
+let lastAggregation = 0
+const MIN_AGGREGATION_INTERVAL_MS = 60_000 // 60 seconds
+
+// Track last GC time
+let lastGC = 0
+const MIN_GC_INTERVAL_MS = 24 * 60 * 60 * 1000 // 24 hours
 
 interface SessionStats {
   session_id: string
@@ -23,6 +32,7 @@ interface SessionStats {
   cache_write_tokens: number
   cost: number
   agents: AgentStats[]
+  modes: ModeStats[]
 }
 
 interface AgentStats {
@@ -32,6 +42,18 @@ interface AgentStats {
   output_tokens: number
   reasoning_tokens: number
   cache_read_tokens: number
+  model_id: string | null
+  provider_id: string | null
+}
+
+interface ModeStats {
+  agent: string
+  message_count: number
+  input_tokens: number
+  output_tokens: number
+  reasoning_tokens: number
+  cache_read_tokens: number
+  cost: number
   model_id: string | null
   provider_id: string | null
 }
@@ -80,6 +102,20 @@ function getStats(): SessionStats[] {
     GROUP BY session_id, agent_type
   `).all() as any[]
 
+  // Mode breakdown (plan/build) per session from messages.agent column
+  const modeRows = db.prepare(`
+    SELECT session_id, agent, model_id, provider_id,
+           COUNT(*)                               AS message_count,
+           COALESCE(SUM(input_tokens), 0)         AS input_tokens,
+           COALESCE(SUM(output_tokens), 0)        AS output_tokens,
+           COALESCE(SUM(reasoning_tokens), 0)     AS reasoning_tokens,
+           COALESCE(SUM(cache_read_tokens), 0)    AS cache_read_tokens,
+           COALESCE(SUM(cost), 0)                 AS cost
+    FROM messages
+    WHERE agent IS NOT NULL
+    GROUP BY session_id, agent, model_id, provider_id
+  `).all() as any[]
+
   db.close()
 
   // Map: parent_id -> child sessions
@@ -95,6 +131,23 @@ function getStats(): SessionStats[] {
   for (const a of agentCalls) {
     if (!agentMap.has(a.session_id)) agentMap.set(a.session_id, new Map())
     agentMap.get(a.session_id)!.set(a.agent_type, a.call_count)
+  }
+
+  // Map: session_id -> ModeStats[]
+  const modeMap = new Map<string, ModeStats[]>()
+  for (const m of modeRows) {
+    if (!modeMap.has(m.session_id)) modeMap.set(m.session_id, [])
+    modeMap.get(m.session_id)!.push({
+      agent: m.agent,
+      message_count: m.message_count,
+      input_tokens: m.input_tokens,
+      output_tokens: m.output_tokens,
+      reasoning_tokens: m.reasoning_tokens,
+      cache_read_tokens: m.cache_read_tokens,
+      cost: m.cost,
+      model_id: m.model_id ?? null,
+      provider_id: m.provider_id ?? null,
+    })
   }
 
   return rootSessions.map((s) => {
@@ -176,6 +229,7 @@ function getStats(): SessionStats[] {
       cache_write_tokens: s.cache_write_tokens,
       cost: s.cost,
       agents: agentDetails,
+      modes: modeMap.get(s.session_id) || [],
     }
   })
 }
@@ -210,8 +264,90 @@ function getTokenSummary(): TokenSummary {
   return result
 }
 
+interface DailyTokens {
+  date: string
+  total: number
+}
+
+function getDailyTokens(): DailyTokens[] {
+  const db = new Database(DB_PATH, { readonly: true })
+  db.run("PRAGMA busy_timeout = 3000")
+
+  // Today live from raw data
+  const today = new Date().toISOString().slice(0, 10)
+  const todayRow = db.prepare(`
+    SELECT ? AS date,
+           COALESCE(SUM(input_tokens + cache_read_tokens + output_tokens + reasoning_tokens), 0) AS total
+    FROM messages
+    WHERE date(timestamp) = ?
+  `).get(today, today) as DailyTokens
+
+  // Historical data from daily_usage
+  const historyRows = db.prepare(`
+    SELECT day AS date, tokens_total AS total
+    FROM daily_usage
+    WHERE day < ?
+      AND day >= date('now', '-60 days')
+    ORDER BY day ASC
+  `).all(today) as DailyTokens[]
+
+  db.close()
+
+  // Merge and fill gaps
+  const dataMap = new Map<string, number>()
+  for (const row of historyRows) dataMap.set(row.date, row.total)
+  dataMap.set(todayRow.date, todayRow.total)
+
+  const result: DailyTokens[] = []
+  for (let i = 59; i >= 0; i--) {
+    const d = new Date()
+    d.setDate(d.getDate() - i)
+    const key = d.toISOString().slice(0, 10)
+    result.push({ date: key, total: dataMap.get(key) ?? 0 })
+  }
+
+  return result
+}
+
+interface DailyModelTokens {
+  date: string
+  model: string
+  total: number
+}
+
+function getDailyTokensByModel(): DailyModelTokens[] {
+  const db = new Database(DB_PATH, { readonly: true })
+  db.run("PRAGMA busy_timeout = 3000")
+
+  // For model breakdown, we continue to use raw data (daily_usage doesn't track per-model)
+  const rows = db.prepare(`
+    SELECT date(timestamp) AS date,
+           COALESCE(provider_id, 'unknown') || ' / ' || COALESCE(model_id, 'unknown') AS model,
+           COALESCE(SUM(input_tokens + cache_read_tokens + output_tokens + reasoning_tokens), 0) AS total
+    FROM messages
+    WHERE timestamp >= date('now', '-60 days')
+    GROUP BY date, model
+    ORDER BY date ASC
+  `).all() as DailyModelTokens[]
+
+  db.close()
+  return rows
+}
+
 function fmt(n: number): string {
   return n.toLocaleString("de-DE")
+}
+
+function fmtCompact(n: number): string {
+  if (n >= 1_000_000) {
+    const m = n / 1_000_000
+    return m % 1 === 0 ? `${Math.round(m)}m` : `${m.toFixed(1)}m`
+  }
+  if (n >= 1_000) {
+    const k = n / 1_000
+    return k % 1 === 0 ? `${Math.round(k)}k` : `${k.toFixed(1)}k`
+  }
+  return n.toString()
 }
 
 function esc(s: string): string {
@@ -249,38 +385,264 @@ function renderSessionCard(s: SessionStats): string {
 
   const sessionTokens = renderTokens(s.input_tokens, s.cache_read_tokens, s.output_tokens, s.reasoning_tokens)
 
+  const modeRows = s.modes.map((m) => {
+    const modeTokens = renderTokens(m.input_tokens, m.cache_read_tokens, m.output_tokens, m.reasoning_tokens)
+    const label = m.agent.charAt(0).toUpperCase() + m.agent.slice(1)
+    const modelInfo = m.provider_id || m.model_id
+      ? ` <span class="mode-model">${esc([m.provider_id, m.model_id].filter(Boolean).join(" / "))}</span>`
+      : ""
+    const costStr = m.cost > 0 ? ` <span class="mode-cost">$${m.cost.toFixed(4)}</span>` : ""
+    return `
+      <div class="mode-row">
+        <span class="mode-badge mode-${esc(m.agent)}">${esc(label)}</span>
+        ${modelInfo}
+        <span class="mode-msgs">${m.message_count} msgs</span>
+        <span class="tokens-detail">${modeTokens}</span>
+        ${costStr}
+      </div>`
+  }).join("")
+
   return `
     <div class="session-card">
       <div class="session-header">
         <div class="session-title">${esc(title)}</div>
         <div class="session-time">${time}</div>
       </div>
-      <div class="session-id">${esc(s.session_id)}</div>
+      <div class="session-meta">
+        ${s.directory ? `<span class="session-dir">${esc(s.directory)}</span>` : ""}
+        <span class="session-id">${esc(s.session_id)}</span>
+      </div>
       <div class="session-tokens">
         <span class="token-label">Tokens:</span>
         ${sessionTokens}
       </div>
       ${agentRows ? `<div class="agents-section"><div class="agents-label">Agents</div>${agentRows}</div>` : ""}
+      ${modeRows ? `<div class="agents-section"><div class="agents-label">Mode</div>${modeRows}</div>` : ""}
     </div>`
 }
 
 function renderStatsBar(summary: TokenSummary): string {
   return `
     <div class="stats-bar">
-      <div class="stats-item"><span class="stats-label">Today:</span> <span class="stats-value">${fmt(summary.today)}</span></div>
-      <div class="stats-item"><span class="stats-label">This Week:</span> <span class="stats-value">${fmt(summary.thisWeek)}</span></div>
-      <div class="stats-item"><span class="stats-label">This Month:</span> <span class="stats-value">${fmt(summary.thisMonth)}</span></div>
-      <div class="stats-item"><span class="stats-label">Last Month:</span> <span class="stats-value">${fmt(summary.lastMonth)}</span></div>
+      <span class="stats-badge"><span class="mode-badge mode-overall">Overall</span></span>
+      <span class="stats-pair"><span class="stats-label">Today:</span><span class="stats-value">${fmtCompact(summary.today)}</span></span>
+      <span class="stats-pair"><span class="stats-label">This Week:</span><span class="stats-value">${fmtCompact(summary.thisWeek)}</span></span>
+      <span class="stats-pair"><span class="stats-label">This Month:</span><span class="stats-value">${fmtCompact(summary.thisMonth)}</span></span>
+      <span class="stats-pair"><span class="stats-label">Last Month:</span><span class="stats-value">${fmtCompact(summary.lastMonth)}</span></span>
     </div>`
 }
 
-function renderSessionsFragment(sessions: SessionStats[], summary: TokenSummary): string {
-  const bar = renderStatsBar(summary)
-  if (sessions.length === 0) return bar + '<div class="empty">No sessions recorded yet.</div>'
-  return bar + sessions.map(renderSessionCard).join("")
+function renderDailyChart(daily: DailyTokens[]): string {
+  // Build a map from DB data
+  const dataMap = new Map<string, number>()
+  for (const d of daily) dataMap.set(d.date, d.total)
+
+  // Always render 60 days
+  const days: { date: string; total: number }[] = []
+  for (let i = 59; i >= 0; i--) {
+    const d = new Date()
+    d.setDate(d.getDate() - i)
+    const key = d.toISOString().slice(0, 10)
+    days.push({ date: key, total: dataMap.get(key) ?? 0 })
+  }
+
+  const max = Math.max(...days.map(d => d.total))
+
+  const bars = days.map(d => {
+    const pct = max > 0 && d.total > 0 ? Math.max(1, Math.round((d.total / max) * 100)) : 0
+    // Format date as "Mon, 09 May"
+    const dateObj = new Date(d.date + "T00:00:00")
+    const weekday = dateObj.toLocaleDateString("en-US", { weekday: "short" })
+    const day = String(dateObj.getDate()).padStart(2, "0")
+    const month = dateObj.toLocaleDateString("en-US", { month: "short" })
+    const tooltipDate = `${weekday}, ${day} ${month}`
+    const tooltipTokens = fmt(d.total)
+    return `
+      <div class="chart-col">
+        ${d.total > 0 ? `<div class="chart-value">${d.total >= 1000 ? Math.round(d.total / 1000) + "k" : d.total}</div>` : ""}
+        <div class="chart-bar" style="height: ${pct}%"></div>
+        <div class="chart-tooltip">${tooltipDate}<br>${tooltipTokens} tokens</div>
+      </div>`
+  }).join("")
+
+  // Compute 5-day rolling average
+  const avgPoints: { x: number; y: number }[] = []
+  for (let i = 0; i < days.length; i++) {
+    const window = days.slice(Math.max(0, i - 4), i + 1)
+    const avg = window.reduce((s, d) => s + d.total, 0) / window.length
+    const xPct = ((i + 0.5) / days.length) * 100
+    const yPct = max > 0 ? 100 - (avg / max) * 100 : 100
+    avgPoints.push({ x: xPct, y: yPct })
+  }
+  const polyline = avgPoints.map(p => `${p.x},${p.y}`).join(" ")
+
+  return `
+    <div class="daily-chart">
+      <div class="chart-title">Daily Token Usage (last 60 days)</div>
+      <div class="chart-container">
+        ${bars}
+        <svg class="chart-avg-line" viewBox="0 0 100 100" preserveAspectRatio="none">
+          <polyline points="${polyline}" fill="none" stroke="#f0883e" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+        </svg>
+      </div>
+      <div class="chart-legend">
+        <span class="legend-item"><span class="legend-bar"></span>Daily tokens</span>
+        <span class="legend-item"><span class="legend-line"></span>5-day avg</span>
+      </div>
+    </div>`
 }
 
-function renderHTML(sessions: SessionStats[], summary: TokenSummary): string {
+const MODEL_COLORS = [
+  "#58a6ff", "#3fb950", "#d2a8ff", "#f0883e", "#f85149",
+  "#79c0ff", "#56d364", "#e3b341", "#bc8cff", "#ff7b72",
+]
+
+function renderDailyModelChart(modelData: DailyModelTokens[]): string {
+  // Collect all unique models (sorted by total usage desc for consistent legend order)
+  const modelTotals = new Map<string, number>()
+  for (const d of modelData) {
+    modelTotals.set(d.model, (modelTotals.get(d.model) ?? 0) + d.total)
+  }
+  const models = [...modelTotals.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([m]) => m)
+
+  const colorMap = new Map<string, string>()
+  models.forEach((m, i) => colorMap.set(m, MODEL_COLORS[i % MODEL_COLORS.length]))
+
+  // Build map: date -> { model -> total }
+  const dataMap = new Map<string, Map<string, number>>()
+  for (const d of modelData) {
+    if (!dataMap.has(d.date)) dataMap.set(d.date, new Map())
+    dataMap.get(d.date)!.set(d.model, d.total)
+  }
+
+  // 60 days
+  const days: { date: string; byModel: Map<string, number>; total: number }[] = []
+  for (let i = 59; i >= 0; i--) {
+    const dt = new Date()
+    dt.setDate(dt.getDate() - i)
+    const key = dt.toISOString().slice(0, 10)
+    const byModel = dataMap.get(key) ?? new Map()
+    const total = [...byModel.values()].reduce((s, v) => s + v, 0)
+    days.push({ date: key, byModel, total })
+  }
+
+  const max = Math.max(...days.map(d => d.total), 1)
+
+  const bars = days.map(d => {
+    const dateObj = new Date(d.date + "T00:00:00")
+    const weekday = dateObj.toLocaleDateString("en-US", { weekday: "short" })
+    const day = String(dateObj.getDate()).padStart(2, "0")
+    const month = dateObj.toLocaleDateString("en-US", { month: "short" })
+    const tooltipDate = `${weekday}, ${day} ${month}`
+
+    // Stacked segments (bottom to top = models array order)
+    const segments = models.map(m => {
+      const val = d.byModel.get(m) ?? 0
+      if (val === 0) return ""
+      const pct = (val / max) * 100
+      const color = colorMap.get(m)!
+      return `<div class="model-bar-seg" style="height:${pct}%;background:${color}"></div>`
+    }).join("")
+
+    // Tooltip breakdown
+    const tooltipLines = models
+      .filter(m => (d.byModel.get(m) ?? 0) > 0)
+      .map(m => {
+        const color = colorMap.get(m)!
+        return `<span style="color:${color}">\u25A0</span> ${esc(m)}: ${fmt(d.byModel.get(m)!)}`
+      })
+      .join("<br>")
+
+    return `
+      <div class="chart-col">
+        <div class="model-bar-stack" style="height:${max > 0 && d.total > 0 ? Math.max(1, Math.round((d.total / max) * 100)) : 0}%">
+          ${segments}
+        </div>
+        <div class="chart-tooltip">${tooltipDate}<br>${tooltipLines}</div>
+      </div>`
+  }).join("")
+
+  const legend = models.map(m => {
+    const color = colorMap.get(m)!
+    return `<span class="legend-item"><span class="legend-bar" style="background:${color}"></span>${esc(m)}</span>`
+  }).join("")
+
+  return `
+    <div class="daily-chart">
+      <div class="chart-title">Daily Token Usage by Model (last 60 days)</div>
+      <div class="chart-container">
+        ${bars}
+      </div>
+      <div class="chart-legend">
+        ${legend}
+      </div>
+    </div>`
+}
+
+interface ModeSummary {
+  agent: string
+  today: number
+  thisWeek: number
+  thisMonth: number
+  lastMonth: number
+}
+
+function getModeSummaries(): ModeSummary[] {
+  const db = new Database(DB_PATH, { readonly: true })
+  db.run("PRAGMA busy_timeout = 3000")
+
+  const agents = db.prepare(`
+    SELECT DISTINCT agent FROM messages WHERE agent IS NOT NULL
+  `).all() as { agent: string }[]
+
+  const sum = (agent: string, where: string) => {
+    const row = db.prepare(`
+      SELECT COALESCE(SUM(input_tokens + cache_read_tokens + output_tokens + reasoning_tokens), 0) AS total
+      FROM messages WHERE agent = ? AND ${where}
+    `).get(agent) as any
+    return row?.total ?? 0
+  }
+
+  const results: ModeSummary[] = agents.map(({ agent }) => ({
+    agent,
+    today: sum(agent, "date(timestamp) = date('now')"),
+    thisWeek: sum(agent, "timestamp >= date('now', 'weekday 1', '-7 days')"),
+    thisMonth: sum(agent, "timestamp >= date('now', 'start of month')"),
+    lastMonth: sum(agent, "timestamp >= date('now', 'start of month', '-1 month') AND timestamp < date('now', 'start of month')"),
+  }))
+
+  db.close()
+  return results
+}
+
+function renderModeSummaries(modes: ModeSummary[]): string {
+  if (modes.length === 0) return ""
+
+  return modes.map((m) => {
+    const label = m.agent.charAt(0).toUpperCase() + m.agent.slice(1)
+    return `
+    <div class="stats-bar mode-stats-bar">
+      <span class="stats-badge"><span class="mode-badge mode-${esc(m.agent)}">${esc(label)}</span></span>
+      <span class="stats-pair"><span class="stats-label">Today:</span><span class="stats-value">${fmtCompact(m.today)}</span></span>
+      <span class="stats-pair"><span class="stats-label">This Week:</span><span class="stats-value">${fmtCompact(m.thisWeek)}</span></span>
+      <span class="stats-pair"><span class="stats-label">This Month:</span><span class="stats-value">${fmtCompact(m.thisMonth)}</span></span>
+      <span class="stats-pair"><span class="stats-label">Last Month:</span><span class="stats-value">${fmtCompact(m.lastMonth)}</span></span>
+    </div>`
+  }).join("")
+}
+
+function renderSessionsFragment(sessions: SessionStats[], summary: TokenSummary, daily: DailyTokens[], modeSummaries: ModeSummary[], dailyModel: DailyModelTokens[]): string {
+  const bar = renderStatsBar(summary)
+  const modeStats = renderModeSummaries(modeSummaries)
+  const chart = renderDailyChart(daily)
+  const modelChart = renderDailyModelChart(dailyModel)
+  if (sessions.length === 0) return bar + modeStats + '<hr class="section-divider">' + chart + modelChart + '<div class="empty">No sessions recorded yet.</div>'
+  return bar + modeStats + '<hr class="section-divider">' + chart + modelChart + sessions.map(renderSessionCard).join("")
+}
+
+function renderHTML(sessions: SessionStats[], summary: TokenSummary, daily: DailyTokens[]): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -307,8 +669,8 @@ function renderHTML(sessions: SessionStats[], summary: TokenSummary): string {
     }
     .header h1 { font-size: 18px; font-weight: 600; color: #f0f6fc; }
     .refresh-badge {
-      font-size: 12px; color: #484f58;
-      display: flex; align-items: center; gap: 6px;
+      font-size: 12px; color: #8b949e;
+      display: flex; align-items: center; gap: 10px;
     }
     .refresh-dot {
       width: 6px; height: 6px; border-radius: 50%;
@@ -316,6 +678,26 @@ function renderHTML(sessions: SessionStats[], summary: TokenSummary): string {
       animation: pulse 2s infinite;
     }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    .refresh-timing {
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+      background: #1f2937;
+      color: #6e7681;
+      border: 1px solid #30363d;
+      transition: all 0.3s;
+    }
+    .refresh-timing.slow {
+      background: #3a2f1a;
+      color: #d29922;
+      border-color: #5c4a1f;
+    }
+    .refresh-timing.very-slow {
+      background: #3a2416;
+      color: #f0883e;
+      border-color: #5c3d1f;
+    }
     .session-card {
       background: #161b22;
       border: 1px solid #21262d;
@@ -331,10 +713,14 @@ function renderHTML(sessions: SessionStats[], summary: TokenSummary): string {
     }
     .session-title { font-size: 15px; font-weight: 600; color: #f0f6fc; }
     .session-time { font-size: 12px; color: #484f58; }
-    .session-id {
-      font-size: 11px; color: #484f58; margin-bottom: 8px;
+    .session-meta {
+      display: flex; gap: 8px; align-items: center;
+      margin-bottom: 8px; font-size: 11px;
       word-break: break-all;
     }
+    .session-id { color: #484f58; }
+    .session-dir { color: #8b949e; }
+    .session-dir::after { content: "|"; margin-left: 8px; color: #30363d; }
     .session-tokens {
       font-size: 13px;
       display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
@@ -380,19 +766,133 @@ function renderHTML(sessions: SessionStats[], summary: TokenSummary): string {
     .tokens-detail .token-reasoning { color: #d2a8ff; }
     .tokens-detail .token-cache { color: #6e7681; }
     .tokens-detail .token-sep { color: #30363d; }
+    .mode-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 4px 0 4px 12px; font-size: 13px;
+      border-left: 2px solid #21262d; margin-bottom: 4px;
+    }
+    .mode-badge {
+      background: #1f2937; border: 1px solid #30363d;
+      border-radius: 4px; padding: 1px 8px;
+      font-size: 12px; white-space: nowrap;
+    }
+    .mode-plan { color: #3fb950; border-color: #238636; }
+    .mode-build { color: #f0883e; border-color: #d47616; }
+    .mode-msgs { color: #8b949e; font-size: 12px; min-width: 50px; }
+    .mode-model { color: #484f58; font-size: 11px; }
+    .mode-cost { color: #f0883e; font-size: 12px; }
     .empty {
       text-align: center; color: #484f58;
       padding: 48px; font-size: 14px;
     }
     .stats-bar {
-      display: flex; gap: 32px; align-items: center;
-      padding: 12px 0; margin-bottom: 24px;
-      border-bottom: 1px solid #21262d;
-      font-size: 13px;
+      display: flex;
+      align-items: center;
+      padding: 8px 0; margin-bottom: 0;
+      font-size: 12px;
+      white-space: nowrap;
     }
-    .stats-item { display: flex; gap: 6px; align-items: center; }
+    .stats-pair {
+      width: 160px;
+      flex-shrink: 0;
+    }
     .stats-label { color: #8b949e; }
-    .stats-value { color: #f0f6fc; font-weight: 600; }
+    .stats-value { color: #f0f6fc; font-weight: 600; margin-left: 4px; }
+    .stats-badge { width: 190px; flex-shrink: 0; }
+    .mode-stats-bar {
+      margin-bottom: 0; padding: 6px 0;
+    }
+    .mode-stats-bar:last-of-type {
+      margin-bottom: 0;
+    }
+    .section-divider {
+      border: none; border-top: 1px solid #21262d;
+      margin: 16px 0;
+    }
+    .mode-overall { color: #58a6ff; border-color: #1f6feb; }
+    .daily-chart {
+      margin-bottom: 24px; padding-bottom: 16px;
+      border-bottom: 1px solid #21262d;
+    }
+    .chart-title {
+      font-size: 12px; color: #8b949e; text-transform: uppercase;
+      letter-spacing: 0.5px; margin-bottom: 12px;
+    }
+    .chart-container {
+      display: flex; align-items: flex-end; gap: 2px;
+      height: 80px;
+      position: relative;
+    }
+    .chart-avg-line {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+    }
+    .chart-col {
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; justify-content: flex-end;
+      height: 100%; min-width: 0;
+    }
+    .chart-value {
+      display: none;
+      font-size: 9px; color: #8b949e; margin-bottom: 4px;
+      white-space: nowrap;
+    }
+    .chart-col:hover .chart-value { display: block; }
+    .chart-bar {
+      width: 100%; min-height: 2px;
+      background: #238636; border-radius: 2px 2px 0 0;
+      transition: background 0.2s;
+    }
+    .chart-col:hover .chart-bar { background: #3fb950; }
+    .chart-col {
+      position: relative;
+    }
+    .chart-tooltip {
+      display: none;
+      position: absolute;
+      bottom: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1c2128;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 11px;
+      color: #f0f6fc;
+      white-space: nowrap;
+      text-align: center;
+      z-index: 10;
+      pointer-events: none;
+      line-height: 1.5;
+    }
+    .chart-col:hover .chart-tooltip { display: block; }
+    .chart-legend {
+      display: flex; 
+      column-gap: 20px;
+      row-gap: 4px;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+      margin-top: 8px; font-size: 11px; color: #8b949e;
+      line-height: 1.2;
+    }
+    .legend-item { display: flex; align-items: center; gap: 6px; }
+    .legend-bar {
+      width: 12px; height: 8px; background: #238636;
+      border-radius: 2px; display: inline-block;
+    }
+    .legend-line {
+      width: 16px; height: 2px; background: #f0883e;
+      display: inline-block; border-radius: 1px;
+    }
+    .model-bar-stack {
+      width: 100%; display: flex; flex-direction: column-reverse;
+      border-radius: 2px 2px 0 0; overflow: hidden;
+    }
+    .model-bar-seg {
+      width: 100%; min-height: 0;
+    }
   </style>
 </head>
 <body>
@@ -400,19 +900,41 @@ function renderHTML(sessions: SessionStats[], summary: TokenSummary): string {
     <h1>OpenCode Usage Stats</h1>
     <div class="refresh-badge">
       <div class="refresh-dot"></div>
-      auto-refresh 5s
+      <span>auto-refresh 5s</span>
+      <span id="refresh-timing" class="refresh-timing"></span>
     </div>
   </div>
   <div id="sessions">
-    ${renderSessionsFragment(sessions, summary)}
+    ${renderSessionsFragment(sessions, summary, daily, getModeSummaries(), getDailyTokensByModel())}
   </div>
   <script>
     async function refresh() {
+      const start = performance.now();
       try {
         const res = await fetch("/api/stats");
         const html = await res.text();
         document.getElementById("sessions").innerHTML = html;
-      } catch {}
+        const duration = Math.round(performance.now() - start);
+        updateRefreshTiming(duration);
+      } catch {
+        updateRefreshTiming(null);
+      }
+    }
+    function updateRefreshTiming(ms) {
+      const el = document.getElementById("refresh-timing");
+      if (ms === null) {
+        el.textContent = "failed";
+        el.className = "refresh-timing very-slow";
+        return;
+      }
+      el.textContent = \`took \${ms}ms\`;
+      if (ms > 1000) {
+        el.className = "refresh-timing very-slow";
+      } else if (ms > 500) {
+        el.className = "refresh-timing slow";
+      } else {
+        el.className = "refresh-timing";
+      }
     }
     setInterval(refresh, 5000);
   </script>
@@ -420,31 +942,94 @@ function renderHTML(sessions: SessionStats[], summary: TokenSummary): string {
 </html>`
 }
 
-const server = Bun.serve({
-  port: PORT,
-  fetch(req) {
-    const url = new URL(req.url)
+async function isPortInUse(port: number): Promise<boolean> {
+  try {
+    const response = await fetch(`http://localhost:${port}/`, { signal: AbortSignal.timeout(500) })
+    await response.text()
+    return true
+  } catch {
+    return false
+  }
+}
 
-    if (url.pathname === "/api/stats") {
+const portBusy = await isPortInUse(PORT)
+if (!portBusy) {
+  // Initial aggregation on dashboard startup
+  try {
+    const db = new Database(DB_PATH)
+    const today = new Date().toISOString().slice(0, 10)
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    recomputeDailyUsage(db, sevenDaysAgo, today)
+    lastAggregation = Date.now()
+    
+    // Run GC on startup
+    gcOldData(db, 90)
+    lastGC = Date.now()
+    
+    db.close()
+  } catch (e) {
+    console.error("Initial aggregation/GC failed:", e)
+  }
+
+  const server = Bun.serve({
+    port: PORT,
+    async fetch(req) {
+      const url = new URL(req.url)
+
+      if (url.pathname === "/api/stats") {
+        // 1/100 chance to trigger aggregation (with 60s minimum interval)
+        if (Math.random() < 0.01) {
+          const now = Date.now()
+          if (now - lastAggregation >= MIN_AGGREGATION_INTERVAL_MS) {
+            lastAggregation = now
+            try {
+              const db = new Database(DB_PATH)
+              const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+              const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+              recomputeDailyUsage(db, sevenDaysAgo, yesterday)
+              db.close()
+            } catch (e) {
+              console.error("Background aggregation failed:", e)
+            }
+          }
+        }
+
+        // 1/500 chance to trigger GC (with 24h minimum interval)
+        if (Math.random() < 0.002) {
+          const now = Date.now()
+          if (now - lastGC >= MIN_GC_INTERVAL_MS) {
+            lastGC = now
+            try {
+              const db = new Database(DB_PATH)
+              gcOldData(db, 90)
+              db.close()
+            } catch (e) {
+              console.error("Background GC failed:", e)
+            }
+          }
+        }
+
+        try {
+          return new Response(renderSessionsFragment(getStats(), getTokenSummary(), getDailyTokens(), getModeSummaries(), getDailyTokensByModel()), {
+            headers: { "Content-Type": "text/html; charset=utf-8" },
+          })
+        } catch (e) {
+          return new Response(`<div class="empty">DB error: ${e}</div>`, {
+            headers: { "Content-Type": "text/html; charset=utf-8" },
+          })
+        }
+      }
+
       try {
-        return new Response(renderSessionsFragment(getStats(), getTokenSummary()), {
+        return new Response(renderHTML(getStats(), getTokenSummary(), getDailyTokens()), {
           headers: { "Content-Type": "text/html; charset=utf-8" },
         })
       } catch (e) {
-        return new Response(`<div class="empty">DB error: ${e}</div>`, {
-          headers: { "Content-Type": "text/html; charset=utf-8" },
-        })
+        return new Response(`DB error: ${e}`, { status: 500 })
       }
-    }
-
-    try {
-      return new Response(renderHTML(getStats(), getTokenSummary()), {
-        headers: { "Content-Type": "text/html; charset=utf-8" },
-      })
-    } catch (e) {
-      return new Response(`DB error: ${e}`, { status: 500 })
-    }
-  },
-})
-
-console.log(`Dashboard running at http://localhost:${PORT}`)
+    },
+  })
+  console.log(`Dashboard running at http://localhost:${PORT}`)
+} else {
+  console.log(`Dashboard already running on port ${PORT}, skipping.`)
+}
