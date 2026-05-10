@@ -59,7 +59,9 @@ export class SqliteSessionRepo implements SessionRepo {
 
     if (directory) {
       return this.db
-        .prepare(`${baseQuery} AND s.directory = ? GROUP BY s.session_id ORDER BY s.last_seen DESC`)
+        .prepare(
+          `${baseQuery} AND s.directory = ? GROUP BY s.session_id ORDER BY s.last_seen DESC`,
+        )
         .all(directory) as RootSessionRow[];
     }
 
@@ -70,7 +72,9 @@ export class SqliteSessionRepo implements SessionRepo {
 
   getDistinctDirectories(): string[] {
     return this.db
-      .prepare(`SELECT DISTINCT directory FROM sessions WHERE directory IS NOT NULL ORDER BY directory`)
+      .prepare(
+        `SELECT DISTINCT directory FROM sessions WHERE directory IS NOT NULL ORDER BY directory`,
+      )
       .all()
       .map((row: any) => row.directory as string);
   }

@@ -268,7 +268,7 @@ export function renderTokens(
 
 function recencyClass(lastSeen: string | null | undefined): string {
   if (!lastSeen) return "";
-  const iso = lastSeen.replace(" ", "T") + "Z";
+  const iso = `${lastSeen.replace(" ", "T")}Z`;
   const ageSec = (Date.now() - Date.parse(iso)) / 1000;
   if (Number.isNaN(ageSec) || ageSec < 0) return "";
   if (ageSec < 30) return "session-card--active";
@@ -621,7 +621,12 @@ function renderSessionsFragment(
       ? '<div class="empty">No sessions recorded yet.</div>'
       : sessions.map(renderSessionCard).join("");
 
-  const dirOptions = directories.map((d) => `<option value="${esc(d)}"${d === selectedDir ? " selected" : ""}>${esc(d)}</option>`).join("");
+  const dirOptions = directories
+    .map(
+      (d) =>
+        `<option value="${esc(d)}"${d === selectedDir ? " selected" : ""}>${esc(d)}</option>`,
+    )
+    .join("");
   const dirDropdown = `
     <div class="filter-bar">
       <select id="dir-filter">
@@ -1184,7 +1189,7 @@ if (import.meta.main) {
             return new Response(JSON.stringify(dirs), {
               headers: { "Content-Type": "application/json; charset=utf-8" },
             });
-          } catch (e) {
+          } catch (_e) {
             return new Response("[]", {
               headers: { "Content-Type": "application/json; charset=utf-8" },
             });
@@ -1200,7 +1205,15 @@ if (import.meta.main) {
           const dailyModel = getDailyTokensByModel(readRepos);
           const toolGroups = getToolUsageSummary(readRepos);
           return new Response(
-            renderHTML(sessions, summary, daily, dailyModel, toolGroups, directories, dirFilter),
+            renderHTML(
+              sessions,
+              summary,
+              daily,
+              dailyModel,
+              toolGroups,
+              directories,
+              dirFilter,
+            ),
             {
               headers: { "Content-Type": "text/html; charset=utf-8" },
             },
