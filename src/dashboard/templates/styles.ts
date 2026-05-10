@@ -291,6 +291,35 @@ export const DASHBOARD_CSS = `
       font-size: 12px; color: #8b949e; text-transform: uppercase;
       letter-spacing: 0.5px; margin-bottom: 12px;
     }
+    .session-card--active {
+      border-color: #56d364;
+      box-shadow: 0 0 0 1px #56d364, 0 0 12px rgba(86, 211, 100, 0.35);
+    }
+    .session-card--recent {
+      border-color: #3fb950;
+    }
+    .session-card--idle {
+      border-color: #1a4d1f;
+    }
+    #dir-filter {
+      appearance: none;
+      -webkit-appearance: none;
+      background: #161b22 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5l3 3 3-3' fill='none' stroke='%238b949e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 12px center;
+      color: #c9d1d9;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 8px 36px 8px 12px;
+      font-size: 13px;
+      font-family: inherit;
+      cursor: pointer;
+      width: 100%;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    #dir-filter:hover { border-color: #484f58; }
+    #dir-filter:focus { outline: none; border-color: #58a6ff; box-shadow: 0 0 0 2px rgba(56,139,253,0.25); }
+    .filter-bar {
+      margin-bottom: 16px;
+    }
     @media (max-width: 1000px) {
       .two-col { flex-direction: column; }
       .left-panel { position: static; }

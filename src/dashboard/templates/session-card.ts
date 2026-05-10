@@ -1,9 +1,21 @@
 import type { SessionStats } from "../services/types";
 import { esc, renderTokens } from "./formatters";
 
+function recencyClass(lastSeen: string | null | undefined): string {
+  if (!lastSeen) return "";
+  const iso = `${lastSeen.replace(" ", "T")}Z`;
+  const ageSec = (Date.now() - Date.parse(iso)) / 1000;
+  if (Number.isNaN(ageSec) || ageSec < 0) return "";
+  if (ageSec < 30) return "session-card--active";
+  if (ageSec < 120) return "session-card--recent";
+  if (ageSec < 600) return "session-card--idle";
+  return "";
+}
+
 export function renderSessionCard(s: SessionStats): string {
   const title = s.title || s.directory?.split("/").pop() || s.session_id;
   const time = s.last_seen?.replace("T", " ").slice(0, 16) ?? "";
+  const recency = recencyClass(s.last_seen);
 
   const agentRows = s.agents
     .map((a) => {
@@ -62,7 +74,7 @@ export function renderSessionCard(s: SessionStats): string {
     .join("");
 
   return `
-    <div class="session-card">
+    <div class="session-card${recency ? ` ${recency}` : ""}">
       <div class="session-header">
         <div class="session-title">${esc(title)}</div>
         <div class="session-time">${time}</div>

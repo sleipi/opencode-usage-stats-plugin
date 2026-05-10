@@ -14,15 +14,25 @@ export function createPageRoute(
       return true;
     },
 
-    handle(_req: Request, _url: URL): Response {
+    handle(_req: Request, url: URL): Response {
       try {
-        const sessions = sessionStats.getSessionStats();
+        const dirFilter = url.searchParams.get("dir") || undefined;
+        const directories = sessionStats.getDistinctDirectories();
+        const sessions = sessionStats.getSessionStats(dirFilter);
         const summary = dailyTokens.getTokenSummary();
         const daily = dailyTokens.getDailyTokens();
         const dailyModel = dailyTokens.getDailyTokensByModel();
         const toolGroups = repos.toolCalls.getToolUsageSummary();
         return new Response(
-          renderHTML(sessions, summary, daily, dailyModel, toolGroups),
+          renderHTML(
+            sessions,
+            summary,
+            daily,
+            dailyModel,
+            toolGroups,
+            directories,
+            dirFilter,
+          ),
           {
             headers: { "Content-Type": "text/html; charset=utf-8" },
           },

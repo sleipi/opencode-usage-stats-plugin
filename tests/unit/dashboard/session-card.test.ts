@@ -104,4 +104,20 @@ describe("renderSessionCard", () => {
     expect(html).toContain("$0.0123");
     expect(html).toContain("anthropic / claude-sonnet");
   });
+
+  test("adds active recency class for very recent sessions", () => {
+    const now = new Date();
+    const lastSeen = now.toISOString().replace("T", " ").slice(0, 19);
+    const html = renderSessionCard(makeSession({ last_seen: lastSeen }));
+    expect(html).toContain("session-card--active");
+  });
+
+  test("no recency class for old sessions", () => {
+    const html = renderSessionCard(
+      makeSession({ last_seen: "2020-01-01 00:00:00" }),
+    );
+    expect(html).not.toContain("session-card--active");
+    expect(html).not.toContain("session-card--recent");
+    expect(html).not.toContain("session-card--idle");
+  });
 });

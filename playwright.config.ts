@@ -1,6 +1,8 @@
 import { defineConfig } from "@playwright/test"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
-const testDbPath = "/var/folders/p2/0gbt1nps4m1_t9np42sx_kl00000gn/T/opencode/opencode-usage-stats-e2e.db"
+const testDbPath = join(tmpdir(), "opencode", "opencode-usage-stats-e2e.db")
 const port = 43434
 
 export default defineConfig({

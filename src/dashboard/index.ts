@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import type { Repos } from "../db/repos";
 import { createSqliteRepos, gcOldData } from "../db/sqlite-repository";
+import { createDirectoriesRoute } from "./routes/directories-route";
 import { createPageRoute } from "./routes/page-route";
 import { createStatsRoute } from "./routes/stats-route";
 import { isPortInUse, startServer } from "./server";
@@ -35,6 +36,7 @@ export function createDashboard(deps: DashboardDeps) {
 
       const routes = [
         createStatsRoute(sessionStats, dailyTokens, readRepos, maintenance),
+        createDirectoriesRoute(sessionStats),
         createPageRoute(sessionStats, dailyTokens, readRepos),
       ];
 

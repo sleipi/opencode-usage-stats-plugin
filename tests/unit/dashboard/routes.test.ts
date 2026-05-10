@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { createDirectoriesRoute } from "../../../src/dashboard/routes/directories-route";
 import { createPageRoute } from "../../../src/dashboard/routes/page-route";
 import { createStatsRoute } from "../../../src/dashboard/routes/stats-route";
 import type { DailyTokensService } from "../../../src/dashboard/services/daily-tokens-service";
@@ -7,7 +8,7 @@ import type { SessionStatsService } from "../../../src/dashboard/services/sessio
 import type { Repos } from "../../../src/db/repos";
 
 function makeStubSessionStats(): SessionStatsService {
-  return { getSessionStats: () => [] };
+  return { getSessionStats: () => [], getDistinctDirectories: () => [] };
 }
 
 function makeStubDailyTokens(): DailyTokensService {
@@ -36,6 +37,7 @@ function makeStubRepos(): Repos {
     sessions: {
       getRootSessions: () => [],
       getChildSessions: () => [],
+      getDistinctDirectories: () => [],
       upsert: () => {},
       upsertFull: () => {},
       deleteOrphaned: () => 0,
@@ -120,6 +122,9 @@ describe("StatsRoute", () => {
       getSessionStats: () => {
         throw new Error("DB error");
       },
+      getDistinctDirectories: () => {
+        throw new Error("DB error");
+      },
     };
     const route = createStatsRoute(
       sessionStats,
@@ -161,6 +166,9 @@ describe("PageRoute", () => {
       getSessionStats: () => {
         throw new Error("DB error");
       },
+      getDistinctDirectories: () => {
+        throw new Error("DB error");
+      },
     };
     const route = createPageRoute(
       sessionStats,
@@ -170,5 +178,61 @@ describe("PageRoute", () => {
     const req = new Request("http://localhost/");
     const res = route.handle(req, new URL(req.url));
     expect(res.status).toBe(500);
+  });
+
+  test("passes directory filter from query string", async () => {
+    let receivedDir: string | undefined;
+    const sessionStats: SessionStatsService = {
+      getSessionStats: (dir) => {
+        receivedDir = dir;
+        return [];
+      },
+      getDistinctDirectories: () => ["/proj/a", "/proj/b"],
+    };
+    const route = createPageRoute(
+      sessionStats,
+      makeStubDailyTokens(),
+      makeStubRepos(),
+    );
+    const req = new Request("http://localhost/?dir=/proj/a");
+    const res = route.handle(req, new URL(req.url));
+    const body = await res.text();
+    expect(receivedDir).toBe("/proj/a");
+    expect(body).toContain("selected");
+  });
+});
+
+describe("DirectoriesRoute", () => {
+  test("matches /api/directories", () => {
+    const route = createDirectoriesRoute(makeStubSessionStats());
+    expect(route.match(new URL("http://localhost/api/directories"))).toBe(true);
+    expect(route.match(new URL("http://localhost/"))).toBe(false);
+  });
+
+  test("returns JSON array of directories", async () => {
+    const sessionStats: SessionStatsService = {
+      getSessionStats: () => [],
+      getDistinctDirectories: () => ["/proj/a", "/proj/b"],
+    };
+    const route = createDirectoriesRoute(sessionStats);
+    const req = new Request("http://localhost/api/directories");
+    const res = route.handle(req, new URL(req.url));
+    expect(res.headers.get("Content-Type")).toContain("application/json");
+    const body = await res.json();
+    expect(body).toEqual(["/proj/a", "/proj/b"]);
+  });
+
+  test("returns empty array on error", async () => {
+    const sessionStats: SessionStatsService = {
+      getSessionStats: () => [],
+      getDistinctDirectories: () => {
+        throw new Error("DB error");
+      },
+    };
+    const route = createDirectoriesRoute(sessionStats);
+    const req = new Request("http://localhost/api/directories");
+    const res = route.handle(req, new URL(req.url));
+    const body = await res.json();
+    expect(body).toEqual([]);
   });
 });

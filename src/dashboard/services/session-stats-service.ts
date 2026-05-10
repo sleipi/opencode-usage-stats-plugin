@@ -2,13 +2,18 @@ import type { Repos } from "../../db/repos";
 import type { AgentStats, ModeStats, SessionStats } from "./types";
 
 export interface SessionStatsService {
-  getSessionStats(): SessionStats[];
+  getSessionStats(directory?: string): SessionStats[];
+  getDistinctDirectories(): string[];
 }
 
 export function createSessionStatsService(repos: Repos): SessionStatsService {
   return {
-    getSessionStats(): SessionStats[] {
-      const rootSessions = repos.sessions.getRootSessions();
+    getDistinctDirectories(): string[] {
+      return repos.sessions.getDistinctDirectories();
+    },
+
+    getSessionStats(directory?: string): SessionStats[] {
+      const rootSessions = repos.sessions.getRootSessions(directory);
       const childSessions = repos.sessions.getChildSessions();
       const agentCalls = repos.toolCalls.getAgentCalls();
       const modeRows = repos.messages.getModeStats();

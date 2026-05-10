@@ -44,4 +44,32 @@ describe("renderSessionsFragment", () => {
     expect(html).toContain("My Session");
     expect(html).toContain("session-card");
   });
+
+  test("renders directory filter dropdown", () => {
+    const html = renderSessionsFragment(
+      [],
+      summary,
+      [],
+      [],
+      [],
+      ["/proj/a", "/proj/b"],
+    );
+    expect(html).toContain("dir-filter");
+    expect(html).toContain("/proj/a");
+    expect(html).toContain("/proj/b");
+    expect(html).toContain("All directories");
+  });
+
+  test("marks selected directory in dropdown", () => {
+    const html = renderSessionsFragment(
+      [],
+      summary,
+      [],
+      [],
+      [],
+      ["/proj/a", "/proj/b"],
+      "/proj/b",
+    );
+    expect(html).toContain('value="/proj/b" selected');
+  });
 });

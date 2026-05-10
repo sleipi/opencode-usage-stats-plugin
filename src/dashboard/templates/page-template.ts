@@ -29,16 +29,31 @@ export const CLIENT_SCRIPT = `
         el.open = shouldOpen;
         if (shouldOpen) opened += 1;
       });
+    }
 
+    let currentDirFilter = "";
+
+    function attachDirFilter() {
+      const el = document.getElementById("dir-filter");
+      if (!el) return;
+      el.value = currentDirFilter;
+      el.addEventListener("change", function() {
+        currentDirFilter = el.value;
+        refresh();
+      });
     }
 
     async function refresh() {
       const start = performance.now();
       const openToolGroups = collectOpenToolGroups();
+      const dirEl = document.getElementById("dir-filter");
+      if (dirEl) currentDirFilter = dirEl.value;
+      const params = currentDirFilter ? "?dir=" + encodeURIComponent(currentDirFilter) : "";
       try {
-        const res = await fetch("/api/stats");
+        const res = await fetch("/api/stats" + params);
         const html = await res.text();
         document.getElementById("sessions").innerHTML = html;
+        attachDirFilter();
         restoreOpenToolGroups(openToolGroups);
         const duration = Math.round(performance.now() - start);
         updateRefreshTiming(duration);
@@ -62,7 +77,8 @@ export const CLIENT_SCRIPT = `
         el.className = "refresh-timing";
       }
     }
-    setInterval(refresh, 5000);`;
+    setInterval(refresh, 5000);
+    attachDirFilter();`;
 
 export function renderHTML(
   sessions: SessionStats[],
@@ -70,6 +86,8 @@ export function renderHTML(
   daily: DailyTokens[],
   dailyModel: DailyModelTokens[],
   toolGroups: ToolGroupSummary[],
+  directories: string[] = [],
+  selectedDir?: string,
 ): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -89,7 +107,7 @@ export function renderHTML(
     </div>
   </div>
   <div id="sessions">
-    ${renderSessionsFragment(sessions, summary, daily, dailyModel, toolGroups)}
+    ${renderSessionsFragment(sessions, summary, daily, dailyModel, toolGroups, directories, selectedDir)}
   </div>
   <script>${CLIENT_SCRIPT}</script>
 </body>

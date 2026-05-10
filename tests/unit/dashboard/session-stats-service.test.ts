@@ -14,6 +14,7 @@ function makeStubRepos(
     sessions: {
       getRootSessions: () => overrides.rootSessions ?? [],
       getChildSessions: () => overrides.childSessions ?? [],
+      getDistinctDirectories: () => [],
       upsert: () => {},
       upsertFull: () => {},
       deleteOrphaned: () => 0,
