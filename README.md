@@ -43,6 +43,12 @@ Start the dashboard manually:
 bun run dashboard
 ```
 
+Use a custom port if 3333 is already occupied by OpenCode itself:
+
+```bash
+PORT=3334 bun run dashboard
+```
+
 Opens at [http://localhost:3333](http://localhost:3333).
 
 The dashboard auto-refreshes every 5 seconds and shows:
@@ -53,6 +59,8 @@ The dashboard auto-refreshes every 5 seconds and shows:
 ## Data Storage
 
 All data is stored in `~/.config/opencode/usage-stats.db` (SQLite). This file is not part of the repository.
+
+For tests, you can override the DB path via `OPENCODE_USAGE_STATS_DB`.
 
 Tables:
 - `sessions` — session metadata (title, directory, parent_id, timestamps)
@@ -66,6 +74,20 @@ The plugin hooks into OpenCode's `event` system:
 - `message.updated` — captures token counts, model, provider, and cost per assistant message
 
 Subagent tokens are aggregated into their parent session in the dashboard via `parent_id` linking.
+
+## Testing
+
+Run unit tests:
+
+```bash
+bun test tests/unit
+```
+
+Run end-to-end tests (Playwright):
+
+```bash
+bun run test:e2e
+```
 
 ## License
 

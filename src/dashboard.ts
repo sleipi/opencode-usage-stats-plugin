@@ -8,7 +8,7 @@ import { Database } from "bun:sqlite"
 import { join } from "path"
 import { recomputeDailyUsage, gcOldData } from "./plugin"
 
-const DB_PATH = join(process.env.HOME || "~", ".config", "opencode", "usage-stats.db")
+const DB_PATH = process.env.OPENCODE_USAGE_STATS_DB || join(process.env.HOME || "~", ".config", "opencode", "usage-stats.db")
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3333
 
 // Track last aggregation time to avoid running too often
@@ -338,7 +338,7 @@ function fmt(n: number): string {
   return n.toLocaleString("de-DE")
 }
 
-function fmtCompact(n: number): string {
+export function fmtCompact(n: number): string {
   if (n >= 1_000_000) {
     const m = n / 1_000_000
     return m % 1 === 0 ? `${Math.round(m)}m` : `${m.toFixed(1)}m`
@@ -350,11 +350,11 @@ function fmtCompact(n: number): string {
   return n.toString()
 }
 
-function esc(s: string): string {
+export function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
 }
 
-function renderTokens(input: number, cache: number, output: number, reasoning: number): string {
+export function renderTokens(input: number, cache: number, output: number, reasoning: number): string {
   const totalIn = input + cache
   const cachePercent = totalIn > 0 ? Math.round((cache / totalIn) * 100) : 0
   const cacheInfo = cache > 0 ? ` <span class="token-cache">(${cachePercent}% cached)<span class="info-icon" title="Cache-Read-Tokens: Input-Tokens die der Provider aus seinem Prompt-Cache liest statt neu zu verarbeiten. In langen Konversationen bleibt der bisherige Kontext (System-Prompt, vorherige Nachrichten, Tool-Outputs) gecached. Das ist schneller und günstiger (bis zu 90% Rabatt bei Anthropic).">?</span></span>` : ""
@@ -1152,84 +1152,86 @@ async function isPortInUse(port: number): Promise<boolean> {
   }
 }
 
-const portBusy = await isPortInUse(PORT)
-if (!portBusy) {
-  // Initial aggregation on dashboard startup
-  try {
-    const db = new Database(DB_PATH)
-    const today = new Date().toISOString().slice(0, 10)
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-    recomputeDailyUsage(db, sevenDaysAgo, today)
-    lastAggregation = Date.now()
-    
-    // Run GC on startup
-    gcOldData(db, 90)
-    lastGC = Date.now()
-    
-    db.close()
-  } catch (e) {
-    console.error("Initial aggregation/GC failed:", e)
-  }
+if (import.meta.main) {
+  const portBusy = await isPortInUse(PORT)
+  if (!portBusy) {
+    // Initial aggregation on dashboard startup
+    try {
+      const db = new Database(DB_PATH)
+      const today = new Date().toISOString().slice(0, 10)
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+      recomputeDailyUsage(db, sevenDaysAgo, today)
+      lastAggregation = Date.now()
 
-  const server = Bun.serve({
-    port: PORT,
-    async fetch(req) {
-      const url = new URL(req.url)
+      // Run GC on startup
+      gcOldData(db, 90)
+      lastGC = Date.now()
 
-      if (url.pathname === "/api/stats") {
-        // 1/100 chance to trigger aggregation (with 60s minimum interval)
-        if (Math.random() < 0.01) {
-          const now = Date.now()
-          if (now - lastAggregation >= MIN_AGGREGATION_INTERVAL_MS) {
-            lastAggregation = now
-            try {
-              const db = new Database(DB_PATH)
-              const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-              const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-              recomputeDailyUsage(db, sevenDaysAgo, yesterday)
-              db.close()
-            } catch (e) {
-              console.error("Background aggregation failed:", e)
+      db.close()
+    } catch (e) {
+      console.error("Initial aggregation/GC failed:", e)
+    }
+
+    Bun.serve({
+      port: PORT,
+      async fetch(req) {
+        const url = new URL(req.url)
+
+        if (url.pathname === "/api/stats") {
+          // 1/100 chance to trigger aggregation (with 60s minimum interval)
+          if (Math.random() < 0.01) {
+            const now = Date.now()
+            if (now - lastAggregation >= MIN_AGGREGATION_INTERVAL_MS) {
+              lastAggregation = now
+              try {
+                const db = new Database(DB_PATH)
+                const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+                const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+                recomputeDailyUsage(db, sevenDaysAgo, yesterday)
+                db.close()
+              } catch (e) {
+                console.error("Background aggregation failed:", e)
+              }
             }
           }
-        }
 
-        // 1/500 chance to trigger GC (with 24h minimum interval)
-        if (Math.random() < 0.002) {
-          const now = Date.now()
-          if (now - lastGC >= MIN_GC_INTERVAL_MS) {
-            lastGC = now
-            try {
-              const db = new Database(DB_PATH)
-              gcOldData(db, 90)
-              db.close()
-            } catch (e) {
-              console.error("Background GC failed:", e)
+          // 1/500 chance to trigger GC (with 24h minimum interval)
+          if (Math.random() < 0.002) {
+            const now = Date.now()
+            if (now - lastGC >= MIN_GC_INTERVAL_MS) {
+              lastGC = now
+              try {
+                const db = new Database(DB_PATH)
+                gcOldData(db, 90)
+                db.close()
+              } catch (e) {
+                console.error("Background GC failed:", e)
+              }
             }
+          }
+
+          try {
+            return new Response(renderSessionsFragment(getStats(), getTokenSummary(), getDailyTokens(), getDailyTokensByModel()), {
+              headers: { "Content-Type": "text/html; charset=utf-8" },
+            })
+          } catch (e) {
+            return new Response(`<div class="empty">DB error: ${e}</div>`, {
+              headers: { "Content-Type": "text/html; charset=utf-8" },
+            })
           }
         }
 
         try {
-          return new Response(renderSessionsFragment(getStats(), getTokenSummary(), getDailyTokens(), getDailyTokensByModel()), {
+          return new Response(renderHTML(getStats(), getTokenSummary(), getDailyTokens()), {
             headers: { "Content-Type": "text/html; charset=utf-8" },
           })
         } catch (e) {
-          return new Response(`<div class="empty">DB error: ${e}</div>`, {
-            headers: { "Content-Type": "text/html; charset=utf-8" },
-          })
+          return new Response(`DB error: ${e}`, { status: 500 })
         }
-      }
-
-      try {
-        return new Response(renderHTML(getStats(), getTokenSummary(), getDailyTokens()), {
-          headers: { "Content-Type": "text/html; charset=utf-8" },
-        })
-      } catch (e) {
-        return new Response(`DB error: ${e}`, { status: 500 })
-      }
-    },
-  })
-  console.log(`Dashboard running at http://localhost:${PORT}`)
-} else {
-  console.log(`Dashboard already running on port ${PORT}, skipping.`)
+      },
+    })
+    console.log(`Dashboard running at http://localhost:${PORT}`)
+  } else {
+    console.log(`Dashboard already running on port ${PORT}, skipping.`)
+  }
 }

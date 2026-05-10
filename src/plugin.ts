@@ -2,7 +2,7 @@ import type { Plugin } from "@opencode-ai/plugin"
 import { Database } from "bun:sqlite"
 import { join } from "path"
 
-const DB_PATH = join(process.env.HOME || "~", ".config", "opencode", "usage-stats.db")
+const DB_PATH = process.env.OPENCODE_USAGE_STATS_DB || join(process.env.HOME || "~", ".config", "opencode", "usage-stats.db")
 
 export function initDB(): Database {
   const db = new Database(DB_PATH)

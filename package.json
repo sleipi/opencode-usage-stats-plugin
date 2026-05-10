@@ -4,7 +4,10 @@
   "description": "Usage statistics tracking and dashboard for OpenCode",
   "type": "module",
   "scripts": {
-    "dashboard": "bun --watch run src/dashboard.ts"
+    "dashboard": "bun --watch run src/dashboard.ts",
+    "test": "bun test tests/unit",
+    "test:unit": "bun test tests/unit",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@opencode-ai/plugin": "^1.4.7"
