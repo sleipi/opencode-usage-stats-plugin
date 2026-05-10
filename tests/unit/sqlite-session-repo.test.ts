@@ -55,4 +55,87 @@ describe("sqlite session repo", () => {
 
     repos.close();
   });
+
+  test("getRootSessions filters by directory", () => {
+    const { dir, dbPath } = createTempDbPath("opencode-usage-stats-repos-");
+    cleanupDirs.push(dir);
+
+    const repos = createSqliteRepos(dbPath);
+    repos.sessions.upsertFull({
+      sessionId: "s-a",
+      projectId: "p1",
+      parentId: null,
+      title: "Session A",
+      directory: "/projects/alpha",
+    });
+    repos.sessions.upsertFull({
+      sessionId: "s-b",
+      projectId: "p2",
+      parentId: null,
+      title: "Session B",
+      directory: "/projects/beta",
+    });
+
+    const filtered = repos.sessions.getRootSessions("/projects/alpha");
+    expect(filtered.length).toBe(1);
+    expect(filtered[0]?.session_id).toBe("s-a");
+
+    const all = repos.sessions.getRootSessions();
+    expect(all.length).toBe(2);
+
+    repos.close();
+  });
+
+  test("getDistinctDirectories returns unique sorted directories", () => {
+    const { dir, dbPath } = createTempDbPath("opencode-usage-stats-repos-");
+    cleanupDirs.push(dir);
+
+    const repos = createSqliteRepos(dbPath);
+    repos.sessions.upsertFull({
+      sessionId: "s-1",
+      projectId: "p1",
+      parentId: null,
+      title: "A",
+      directory: "/projects/beta",
+    });
+    repos.sessions.upsertFull({
+      sessionId: "s-2",
+      projectId: "p1",
+      parentId: null,
+      title: "B",
+      directory: "/projects/alpha",
+    });
+    repos.sessions.upsertFull({
+      sessionId: "s-3",
+      projectId: "p1",
+      parentId: null,
+      title: "C",
+      directory: "/projects/beta",
+    });
+
+    const dirs = repos.sessions.getDistinctDirectories();
+    expect(dirs).toEqual(["/projects/alpha", "/projects/beta"]);
+
+    repos.close();
+  });
+
+  test("getDistinctDirectories excludes null directories", () => {
+    const { dir, dbPath } = createTempDbPath("opencode-usage-stats-repos-");
+    cleanupDirs.push(dir);
+
+    const repos = createSqliteRepos(dbPath);
+    repos.sessions.upsert({ sessionId: "s-null", projectId: "p1" });
+    repos.sessions.upsertFull({
+      sessionId: "s-with-dir",
+      projectId: "p1",
+      parentId: null,
+      title: "Has dir",
+      directory: "/projects/gamma",
+    });
+
+    const dirs = repos.sessions.getDistinctDirectories();
+    expect(dirs).toEqual(["/projects/gamma"]);
+
+    repos.close();
+  });
 });

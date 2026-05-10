@@ -115,6 +115,7 @@ function createReposDouble(opts?: {
       getRootSessions: () => [],
       getChildSessions: () => [],
       deleteOrphaned: () => 0,
+      getDistinctDirectories: () => [],
     },
     messages: {
       upsert: (data) => messageUpsert.impl(data),
