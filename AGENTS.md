@@ -80,6 +80,12 @@ Data lives at `~/.config/opencode/usage-stats.db` (not in repo). Four tables: `s
 
 Plugin is registered via symlinks into `~/.config/opencode/plugins/`, not via `opencode.json`. Both `plugin.ts` and `dashboard.ts` must be symlinked separately.
 
+## Git Workflow
+
+- Never commit directly to `main`. Always create a feature branch for changes.
+- If the current branch is `main`, create the feature branch from `main` and open the PR targeting `main`.
+- If the current branch is not `main`, create the feature branch from that branch and open the PR targeting that originating branch.
+
 ## Roadmap
 
 `ROADMAP.md` tracks planned and completed work. Rules:
