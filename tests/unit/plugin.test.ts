@@ -1,11 +1,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test"
 import { Database } from "bun:sqlite"
 import { mkdtempSync, rmSync } from "fs"
-import { join } from "path"
 import { tmpdir } from "os"
+import { join } from "path"
 
 function createTempDb() {
-  const dir = mkdtempSync(join(tmpdir(), "opencode-usage-stats-unit-"))
+  const dir = mkdtempSync(join(tmpdir(), "opencode-usage-stats-plugin-"))
   const dbPath = join(dir, "usage-stats.db")
   process.env.OPENCODE_USAGE_STATS_DB = dbPath
   return { dir, dbPath }
@@ -16,7 +16,7 @@ function cleanupTempDb(dir: string) {
   rmSync(dir, { recursive: true, force: true })
 }
 
-describe("plugin database utilities", () => {
+describe("UsageStatsPlugin hooks", () => {
   const { dir, dbPath } = createTempDb()
   let mod: typeof import("../../src/plugin")
 
@@ -25,11 +25,12 @@ describe("plugin database utilities", () => {
   })
 
   beforeEach(() => {
-    const db = mod.initDB()
-    db.run("DELETE FROM daily_usage")
-    db.run("DELETE FROM messages")
-    db.run("DELETE FROM tool_calls")
-    db.run("DELETE FROM sessions")
+    const db = new Database(dbPath)
+    db.run("PRAGMA user_version = 0")
+    db.run("DROP TABLE IF EXISTS daily_usage")
+    db.run("DROP TABLE IF EXISTS messages")
+    db.run("DROP TABLE IF EXISTS tool_calls")
+    db.run("DROP TABLE IF EXISTS sessions")
     db.close()
   })
 
@@ -37,125 +38,202 @@ describe("plugin database utilities", () => {
     cleanupTempDb(dir)
   })
 
-  test("initDB creates required tables", async () => {
-    const db = mod.initDB()
+  test("tool.execute.after upserts session and stores tool call", async () => {
+    const hooks = await mod.UsageStatsPlugin({ project: { id: "project-2" } } as any)
 
-    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]
-    const tableNames = new Set(tables.map((t) => t.name))
-
-    expect(tableNames.has("sessions")).toBe(true)
-    expect(tableNames.has("messages")).toBe(true)
-    expect(tableNames.has("tool_calls")).toBe(true)
-    expect(tableNames.has("daily_usage")).toBe(true)
-
-    db.close()
-  })
-
-  test("recomputeDailyUsage aggregates day data", async () => {
-    const db = mod.initDB()
-
-    db.prepare("INSERT INTO sessions (session_id, first_seen, last_seen) VALUES (?, ?, ?)").run(
-      "sess-1",
-      "2026-05-01 10:00:00",
-      "2026-05-01 11:00:00",
+    await hooks["tool.execute.after"](
+      {
+        sessionID: "sess-2",
+        callID: "call-2",
+        tool: "bash",
+        args: { description: "list files" },
+      } as any,
+      {} as any,
     )
-    db.prepare("INSERT INTO sessions (session_id, first_seen, last_seen) VALUES (?, ?, ?)").run(
-      "sess-2",
-      "2026-05-02 10:00:00",
-      "2026-05-02 11:00:00",
-    )
-
-    db.prepare(`
-      INSERT INTO messages (session_id, message_id, role, input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cost, timestamp)
-      VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?)
-    `).run("sess-1", "msg-1", 100, 50, 10, 20, 0.1234, "2026-05-01 12:00:00")
-
-    db.prepare("INSERT INTO tool_calls (session_id, call_id, tool_name, timestamp) VALUES (?, ?, ?, ?)").run(
-      "sess-1",
-      "call-1",
-      "bash",
-      "2026-05-01 12:00:00",
-    )
-
-    mod.recomputeDailyUsage(db, "2026-05-01", "2026-05-02")
-    db.close()
 
     const checkDb = new Database(dbPath, { readonly: true })
-    const rows = checkDb.prepare(`
-      SELECT day, tokens_total, cost_total, sessions_count, messages_count, tool_calls_count
-      FROM daily_usage
-      ORDER BY day
-    `).all() as Array<{
-      day: string
-      tokens_total: number
-      cost_total: number
-      sessions_count: number
-      messages_count: number
-      tool_calls_count: number
-    }>
+    const session = checkDb.prepare("SELECT session_id, project_id FROM sessions WHERE session_id = ?").get("sess-2") as
+      | { session_id: string; project_id: string }
+      | null
+    const toolCall = checkDb
+      .prepare("SELECT session_id, call_id, tool_name, description FROM tool_calls WHERE call_id = ?")
+      .get("call-2") as { session_id: string; call_id: string; tool_name: string; description: string } | null
 
-    expect(rows.length).toBe(2)
-    expect(rows[0]?.day).toBe("2026-05-01")
-    expect(rows[0]?.tokens_total).toBe(180)
-    expect(rows[0]?.sessions_count).toBe(1)
-    expect(rows[0]?.messages_count).toBe(1)
-    expect(rows[0]?.tool_calls_count).toBe(1)
-    expect(rows[1]?.day).toBe("2026-05-02")
-    expect(rows[1]?.tokens_total).toBe(0)
-    expect(rows[1]?.sessions_count).toBe(1)
-
+    expect(session).not.toBeNull()
+    expect(session?.project_id).toBe("project-2")
+    expect(toolCall).not.toBeNull()
+    expect(toolCall?.session_id).toBe("sess-2")
+    expect(toolCall?.tool_name).toBe("bash")
+    expect(toolCall?.description).toBe("list files")
     checkDb.close()
   })
 
-  test("gcOldData removes old rows and keeps recent data", async () => {
-    const db = mod.initDB()
+  test("chat.params stores agent and model/provider for following tool call", async () => {
+    const hooks = await mod.UsageStatsPlugin({ project: { id: "project-1" } } as any)
 
-    db.prepare("INSERT INTO sessions (session_id, first_seen, last_seen) VALUES (?, ?, ?)").run(
-      "old-session",
-      "2025-01-01 10:00:00",
-      "2025-01-01 10:00:00",
-    )
-    db.prepare("INSERT INTO sessions (session_id, first_seen, last_seen) VALUES (?, ?, ?)").run(
-      "new-session",
-      "2026-05-01 10:00:00",
-      "2026-05-01 10:00:00",
-    )
-
-    db.prepare(`
-      INSERT INTO messages (session_id, message_id, role, input_tokens, output_tokens, timestamp)
-      VALUES (?, ?, 'assistant', ?, ?, ?)
-    `).run("old-session", "old-msg", 1, 1, "2025-01-01 10:00:00")
-
-    db.prepare(`
-      INSERT INTO messages (session_id, message_id, role, input_tokens, output_tokens, timestamp)
-      VALUES (?, ?, 'assistant', ?, ?, ?)
-    `).run("new-session", "new-msg", 2, 2, "2026-05-01 10:00:00")
-
-    db.prepare("INSERT INTO tool_calls (session_id, call_id, tool_name, timestamp) VALUES (?, ?, ?, ?)").run(
-      "old-session",
-      "old-call",
-      "bash",
-      "2025-01-01 10:00:00",
-    )
-    db.prepare("INSERT INTO tool_calls (session_id, call_id, tool_name, timestamp) VALUES (?, ?, ?, ?)").run(
-      "new-session",
-      "new-call",
-      "bash",
-      "2026-05-01 10:00:00",
+    await hooks["chat.params"](
+      {
+        sessionID: "sess-1",
+        agent: "plan",
+        modelID: "gpt-test",
+        providerID: "openai",
+      } as any,
+      {} as any,
     )
 
-    mod.gcOldData(db, 180)
-    db.close()
+    await hooks["tool.execute.after"](
+      {
+        sessionID: "sess-1",
+        callID: "call-1",
+        tool: "bash",
+        args: { description: "run command" },
+      } as any,
+      {} as any,
+    )
 
     const checkDb = new Database(dbPath, { readonly: true })
-    const msgIds = checkDb.prepare("SELECT message_id FROM messages ORDER BY message_id").all() as Array<{ message_id: string }>
-    const callIds = checkDb.prepare("SELECT call_id FROM tool_calls ORDER BY call_id").all() as Array<{ call_id: string }>
-    const sessions = checkDb.prepare("SELECT session_id FROM sessions ORDER BY session_id").all() as Array<{ session_id: string }>
+    const row = checkDb
+      .prepare("SELECT agent, model_id, provider_id, description FROM tool_calls WHERE call_id = ?")
+      .get("call-1") as { agent: string; model_id: string; provider_id: string; description: string } | null
 
-    expect(msgIds.map((r) => r.message_id)).toEqual(["new-msg"])
-    expect(callIds.map((r) => r.call_id)).toEqual(["new-call"])
-    expect(sessions.map((r) => r.session_id)).toEqual(["new-session"])
-
+    expect(row).not.toBeNull()
+    expect(row?.agent).toBe("plan")
+    expect(row?.model_id).toBe("gpt-test")
+    expect(row?.provider_id).toBe("openai")
+    expect(row?.description).toBe("run command")
     checkDb.close()
+  })
+
+  test("event session.created upserts metadata", async () => {
+    const hooks = await mod.UsageStatsPlugin({ project: { id: "project-1" } } as any)
+
+    await hooks.event({
+      event: {
+        type: "session.created",
+        properties: {
+          info: {
+            id: "sess-meta",
+            projectID: "project-x",
+            parentID: "parent-1",
+            title: "My Session",
+            directory: "/tmp/work",
+          },
+        },
+      },
+    } as any)
+
+    const checkDb = new Database(dbPath, { readonly: true })
+    const row = checkDb
+      .prepare("SELECT session_id, project_id, parent_id, title, directory FROM sessions WHERE session_id = ?")
+      .get("sess-meta") as
+      | { session_id: string; project_id: string; parent_id: string; title: string; directory: string }
+      | null
+
+    expect(row).not.toBeNull()
+    expect(row?.project_id).toBe("project-x")
+    expect(row?.parent_id).toBe("parent-1")
+    expect(row?.title).toBe("My Session")
+    expect(row?.directory).toBe("/tmp/work")
+    checkDb.close()
+  })
+
+  test("event message.updated inserts assistant message", async () => {
+    const hooks = await mod.UsageStatsPlugin({ project: { id: "project-1" } } as any)
+
+    await hooks.event({
+      event: {
+        type: "message.updated",
+        properties: {
+          info: {
+            id: "msg-1",
+            sessionID: "sess-msg",
+            role: "assistant",
+            modelID: "gpt-4.1",
+            providerID: "openai",
+            tokens: {
+              input: 10,
+              output: 5,
+              reasoning: 2,
+              cache: { read: 3, write: 1 },
+            },
+            cost: 0.42,
+          },
+        },
+      },
+    } as any)
+
+    const checkDb = new Database(dbPath, { readonly: true })
+    const msg = checkDb
+      .prepare(`
+        SELECT session_id, message_id, role, model_id, provider_id,
+               input_tokens, output_tokens, reasoning_tokens,
+               cache_read_tokens, cache_write_tokens, cost
+        FROM messages
+        WHERE message_id = ?
+      `)
+      .get("msg-1") as
+      | {
+          session_id: string
+          message_id: string
+          role: string
+          model_id: string
+          provider_id: string
+          input_tokens: number
+          output_tokens: number
+          reasoning_tokens: number
+          cache_read_tokens: number
+          cache_write_tokens: number
+          cost: number
+        }
+      | null
+
+    expect(msg).not.toBeNull()
+    expect(msg?.session_id).toBe("sess-msg")
+    expect(msg?.role).toBe("assistant")
+    expect(msg?.model_id).toBe("gpt-4.1")
+    expect(msg?.provider_id).toBe("openai")
+    expect(msg?.input_tokens).toBe(10)
+    expect(msg?.output_tokens).toBe(5)
+    expect(msg?.reasoning_tokens).toBe(2)
+    expect(msg?.cache_read_tokens).toBe(3)
+    expect(msg?.cache_write_tokens).toBe(1)
+    expect(msg?.cost).toBe(0.42)
+    checkDb.close()
+  })
+
+  test("hooks tolerate write failures without throwing", async () => {
+    const hooks = await mod.UsageStatsPlugin({ project: { id: "project-1" } } as any)
+
+    const db = new Database(dbPath)
+    db.run("DROP TABLE IF EXISTS messages")
+    db.run("DROP TABLE IF EXISTS sessions")
+    db.run("DROP TABLE IF EXISTS tool_calls")
+    db.close()
+
+    await expect(
+      hooks["tool.execute.after"](
+        {
+          sessionID: "sess-1",
+          callID: "call-1",
+          tool: "bash",
+        } as any,
+        {} as any,
+      ),
+    ).resolves.toBeUndefined()
+
+    await expect(
+      hooks.event({
+        event: {
+          type: "message.updated",
+          properties: {
+            info: {
+              id: "msg-1",
+              sessionID: "sess-1",
+              role: "assistant",
+            },
+          },
+        },
+      } as any),
+    ).resolves.toBeUndefined()
   })
 })

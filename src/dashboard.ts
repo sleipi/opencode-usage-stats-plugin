@@ -4,9 +4,9 @@
  * Run: bun run ~/.config/opencode/plugins/usage-stats-dashboard.ts
  * Open: http://localhost:3333
  */
-import { Database } from "bun:sqlite"
 import { join } from "path"
-import { recomputeDailyUsage, gcOldData } from "./plugin"
+import type { DailyModelTokens, DailyTokens, Repos, TokenSummary, ToolGroupSummary } from "./db/interfaces"
+import { createSqliteRepos, gcOldData } from "./db/sqlite-repository"
 
 const DB_PATH = process.env.OPENCODE_USAGE_STATS_DB || join(process.env.HOME || "~", ".config", "opencode", "usage-stats.db")
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3333
@@ -58,65 +58,11 @@ interface ModeStats {
   provider_id: string | null
 }
 
-function getStats(): SessionStats[] {
-  const db = new Database(DB_PATH, { readonly: true })
-  db.run("PRAGMA busy_timeout = 3000")
-
-  // Root sessions (no parent), newest first — own message tokens only
-  const rootSessions = db.prepare(`
-    SELECT
-      s.session_id, s.title, s.directory, s.first_seen, s.last_seen,
-      COALESCE(SUM(m.input_tokens), 0)       AS input_tokens,
-      COALESCE(SUM(m.output_tokens), 0)      AS output_tokens,
-      COALESCE(SUM(m.reasoning_tokens), 0)   AS reasoning_tokens,
-      COALESCE(SUM(m.cache_read_tokens), 0)  AS cache_read_tokens,
-      COALESCE(SUM(m.cache_write_tokens), 0) AS cache_write_tokens,
-      COALESCE(SUM(m.cost), 0)               AS cost
-    FROM sessions s
-    LEFT JOIN messages m ON m.session_id = s.session_id
-    WHERE s.parent_id IS NULL
-    GROUP BY s.session_id
-    ORDER BY s.last_seen DESC
-  `).all() as any[]
-
-  // Child sessions with their token totals, linked to parent via parent_id
-  const childSessions = db.prepare(`
-    SELECT
-      s.session_id, s.parent_id, s.title,
-      COALESCE(SUM(m.input_tokens), 0)       AS input_tokens,
-      COALESCE(SUM(m.output_tokens), 0)      AS output_tokens,
-      COALESCE(SUM(m.reasoning_tokens), 0)   AS reasoning_tokens,
-      COALESCE(SUM(m.cache_read_tokens), 0)  AS cache_read_tokens,
-      m.model_id, m.provider_id
-    FROM sessions s
-    LEFT JOIN messages m ON m.session_id = s.session_id
-    WHERE s.parent_id IS NOT NULL
-    GROUP BY s.session_id
-  `).all() as any[]
-
-  // Agent type per parent session from tool_calls
-  const agentCalls = db.prepare(`
-    SELECT session_id, agent_type, COUNT(*) AS call_count
-    FROM tool_calls
-    WHERE agent_type IS NOT NULL
-    GROUP BY session_id, agent_type
-  `).all() as any[]
-
-  // Mode breakdown (plan/build) per session from messages.agent column
-  const modeRows = db.prepare(`
-    SELECT session_id, agent, model_id, provider_id,
-           COUNT(*)                               AS message_count,
-           COALESCE(SUM(input_tokens), 0)         AS input_tokens,
-           COALESCE(SUM(output_tokens), 0)        AS output_tokens,
-           COALESCE(SUM(reasoning_tokens), 0)     AS reasoning_tokens,
-           COALESCE(SUM(cache_read_tokens), 0)    AS cache_read_tokens,
-           COALESCE(SUM(cost), 0)                 AS cost
-    FROM messages
-    WHERE agent IS NOT NULL
-    GROUP BY session_id, agent, model_id, provider_id
-  `).all() as any[]
-
-  db.close()
+function getStats(repos: Repos): SessionStats[] {
+  const rootSessions = repos.sessions.getRootSessions()
+  const childSessions = repos.sessions.getChildSessions()
+  const agentCalls = repos.toolCalls.getAgentCalls()
+  const modeRows = repos.messages.getModeStats()
 
   // Map: parent_id -> child sessions
   const childMap = new Map<string, any[]>()
@@ -234,64 +180,15 @@ function getStats(): SessionStats[] {
   })
 }
 
-interface TokenSummary {
-  today: number
-  thisWeek: number
-  thisMonth: number
-  lastMonth: number
+function getTokenSummary(repos: Repos): TokenSummary {
+  return repos.messages.getTokenSummary()
 }
 
-function getTokenSummary(): TokenSummary {
-  const db = new Database(DB_PATH, { readonly: true })
-  db.run("PRAGMA busy_timeout = 3000")
-
-  const sum = (where: string) => {
-    const row = db.prepare(`
-      SELECT COALESCE(SUM(input_tokens + cache_read_tokens + output_tokens + reasoning_tokens), 0) AS total
-      FROM messages WHERE ${where}
-    `).get() as any
-    return row?.total ?? 0
-  }
-
-  const result = {
-    today: sum("date(timestamp) = date('now')"),
-    thisWeek: sum("timestamp >= date('now', 'weekday 1', '-7 days')"),
-    thisMonth: sum("timestamp >= date('now', 'start of month')"),
-    lastMonth: sum("timestamp >= date('now', 'start of month', '-1 month') AND timestamp < date('now', 'start of month')"),
-  }
-
-  db.close()
-  return result
-}
-
-interface DailyTokens {
-  date: string
-  total: number
-}
-
-function getDailyTokens(): DailyTokens[] {
-  const db = new Database(DB_PATH, { readonly: true })
-  db.run("PRAGMA busy_timeout = 3000")
-
-  // Today live from raw data
+function getDailyTokens(repos: Repos): DailyTokens[] {
   const today = new Date().toISOString().slice(0, 10)
-  const todayRow = db.prepare(`
-    SELECT ? AS date,
-           COALESCE(SUM(input_tokens + cache_read_tokens + output_tokens + reasoning_tokens), 0) AS total
-    FROM messages
-    WHERE date(timestamp) = ?
-  `).get(today, today) as DailyTokens
+  const todayRow = repos.messages.getTodayTokens(today)
 
-  // Historical data from daily_usage
-  const historyRows = db.prepare(`
-    SELECT day AS date, tokens_total AS total
-    FROM daily_usage
-    WHERE day < ?
-      AND day >= date('now', '-60 days')
-    ORDER BY day ASC
-  `).all(today) as DailyTokens[]
-
-  db.close()
+  const historyRows = repos.dailyUsage.getHistoryUntil(today, 60)
 
   // Merge and fill gaps
   const dataMap = new Map<string, number>()
@@ -309,29 +206,8 @@ function getDailyTokens(): DailyTokens[] {
   return result
 }
 
-interface DailyModelTokens {
-  date: string
-  model: string
-  total: number
-}
-
-function getDailyTokensByModel(): DailyModelTokens[] {
-  const db = new Database(DB_PATH, { readonly: true })
-  db.run("PRAGMA busy_timeout = 3000")
-
-  // For model breakdown, we continue to use raw data (daily_usage doesn't track per-model)
-  const rows = db.prepare(`
-    SELECT date(timestamp) AS date,
-           COALESCE(provider_id, 'unknown') || ' / ' || COALESCE(model_id, 'unknown') AS model,
-           COALESCE(SUM(input_tokens + cache_read_tokens + output_tokens + reasoning_tokens), 0) AS total
-    FROM messages
-    WHERE timestamp >= date('now', '-60 days')
-    GROUP BY date, model
-    ORDER BY date ASC
-  `).all() as DailyModelTokens[]
-
-  db.close()
-  return rows
+function getDailyTokensByModel(repos: Repos): DailyModelTokens[] {
+  return repos.messages.getDailyTokensByModel()
 }
 
 function fmt(n: number): string {
@@ -581,118 +457,8 @@ function renderDailyModelChart(modelData: DailyModelTokens[]): string {
     </div>`
 }
 
-interface ToolGroupSummary {
-  agent: string | null
-  provider_id: string | null
-  model_id: string | null
-  latest_timestamp: string | null
-  tools: ToolCountSummary[]
-}
-
-interface ToolCountSummary {
-  tool_name: string
-  today: number
-  thisWeek: number
-  thisMonth: number
-  lastMonth: number
-}
-
-function getToolUsageSummary(): ToolGroupSummary[] {
-  const db = new Database(DB_PATH, { readonly: true })
-  db.run("PRAGMA busy_timeout = 3000")
-
-  const timeFilters = {
-    today: "date(tc.timestamp) = date('now')",
-    thisWeek: "tc.timestamp >= date('now', 'weekday 1', '-7 days')",
-    thisMonth: "tc.timestamp >= date('now', 'start of month')",
-    lastMonth: "tc.timestamp >= date('now', 'start of month', '-1 month') AND tc.timestamp < date('now', 'start of month')",
-  }
-
-  // Get all distinct groups — fall back to messages table for model/provider if tool_calls has NULL
-  const groups = db.prepare(`
-    SELECT DISTINCT
-      COALESCE(tc.agent,
-        (SELECT m.agent FROM messages m WHERE m.session_id = tc.session_id AND m.agent IS NOT NULL ORDER BY m.timestamp DESC LIMIT 1),
-        '__none__') AS agent,
-      COALESCE(tc.provider_id,
-        (SELECT m.provider_id FROM messages m WHERE m.session_id = tc.session_id AND m.provider_id IS NOT NULL ORDER BY m.timestamp DESC LIMIT 1),
-        '__none__') AS provider_id,
-      COALESCE(tc.model_id,
-        (SELECT m.model_id FROM messages m WHERE m.session_id = tc.session_id AND m.model_id IS NOT NULL ORDER BY m.timestamp DESC LIMIT 1),
-        '__none__') AS model_id
-    FROM tool_calls tc
-    ORDER BY agent, provider_id, model_id
-  `).all() as { agent: string; provider_id: string; model_id: string }[]
-
-  const results: ToolGroupSummary[] = []
-
-  for (const group of groups) {
-    const agentVal = group.agent === "__none__" ? null : group.agent
-    const providerVal = group.provider_id === "__none__" ? null : group.provider_id
-    const modelVal = group.model_id === "__none__" ? null : group.model_id
-
-    // Build WHERE that matches the same fallback logic used in grouping
-    const agentFilter = agentVal === null
-      ? `tc.agent IS NULL AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.session_id = tc.session_id AND m.agent IS NOT NULL)`
-      : `COALESCE(tc.agent, (SELECT m.agent FROM messages m WHERE m.session_id = tc.session_id AND m.agent IS NOT NULL ORDER BY m.timestamp DESC LIMIT 1)) = '${agentVal}'`
-    const providerFilter = providerVal === null
-      ? `tc.provider_id IS NULL AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.session_id = tc.session_id AND m.provider_id IS NOT NULL)`
-      : `COALESCE(tc.provider_id, (SELECT m.provider_id FROM messages m WHERE m.session_id = tc.session_id AND m.provider_id IS NOT NULL ORDER BY m.timestamp DESC LIMIT 1)) = '${providerVal}'`
-    const modelFilter = modelVal === null
-      ? `tc.model_id IS NULL AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.session_id = tc.session_id AND m.model_id IS NOT NULL)`
-      : `COALESCE(tc.model_id, (SELECT m.model_id FROM messages m WHERE m.session_id = tc.session_id AND m.model_id IS NOT NULL ORDER BY m.timestamp DESC LIMIT 1)) = '${modelVal}'`
-    const groupWhere = `${agentFilter} AND ${providerFilter} AND ${modelFilter}`
-
-    // Get tool counts for each time period
-    const toolRows: Record<string, ToolCountSummary> = {}
-
-    for (const [period, timeWhere] of Object.entries(timeFilters)) {
-      const rows = db.prepare(`
-        SELECT tc.tool_name, COUNT(*) AS cnt
-        FROM tool_calls tc
-        WHERE ${groupWhere} AND ${timeWhere}
-        GROUP BY tc.tool_name
-      `).all() as { tool_name: string; cnt: number }[]
-
-      for (const row of rows) {
-        if (!toolRows[row.tool_name]) {
-          toolRows[row.tool_name] = { tool_name: row.tool_name, today: 0, thisWeek: 0, thisMonth: 0, lastMonth: 0 }
-        }
-        toolRows[row.tool_name][period as keyof Omit<ToolCountSummary, "tool_name">] = row.cnt
-      }
-    }
-
-    const tools = Object.values(toolRows).sort((a, b) => (b.thisMonth + b.lastMonth) - (a.thisMonth + a.lastMonth))
-    const latestRow = db.prepare(`
-      SELECT MAX(tc.timestamp) AS latest_timestamp
-      FROM tool_calls tc
-      WHERE ${groupWhere}
-    `).get() as { latest_timestamp: string | null }
-
-    if (tools.length > 0) {
-      results.push({
-        agent: group.agent === "__none__" ? null : group.agent,
-        provider_id: group.provider_id === "__none__" ? null : group.provider_id,
-        model_id: group.model_id === "__none__" ? null : group.model_id,
-        latest_timestamp: latestRow?.latest_timestamp ?? null,
-        tools,
-      })
-    }
-  }
-
-  db.close()
-
-  // Sort groups: newest activity first, then by total calls
-  results.sort((a, b) => {
-    const latestA = a.latest_timestamp ? Date.parse(a.latest_timestamp) : 0
-    const latestB = b.latest_timestamp ? Date.parse(b.latest_timestamp) : 0
-    if (latestA !== latestB) return latestB - latestA
-    const totalA = a.tools.reduce((s, t) => s + t.thisMonth + t.lastMonth, 0)
-    const totalB = b.tools.reduce((s, t) => s + t.thisMonth + t.lastMonth, 0)
-    return totalB - totalA
-  })
-
-  return results
+function getToolUsageSummary(repos: Repos): ToolGroupSummary[] {
+  return repos.toolCalls.getToolUsageSummary()
 }
 
 function renderToolUsage(groups: ToolGroupSummary[]): string {
@@ -734,11 +500,17 @@ function renderToolUsage(groups: ToolGroupSummary[]): string {
     </div>`
 }
 
-function renderSessionsFragment(sessions: SessionStats[], summary: TokenSummary, daily: DailyTokens[], dailyModel: DailyModelTokens[]): string {
+function renderSessionsFragment(
+  sessions: SessionStats[],
+  summary: TokenSummary,
+  daily: DailyTokens[],
+  dailyModel: DailyModelTokens[],
+  toolGroups: ToolGroupSummary[],
+): string {
   const bar = renderStatsBar(summary)
   const chart = renderDailyChart(daily)
   const modelChart = renderDailyModelChart(dailyModel)
-  const toolUsage = renderToolUsage(getToolUsageSummary())
+  const toolUsage = renderToolUsage(toolGroups)
 
   const leftPanel = `
     <div class="left-panel">
@@ -762,7 +534,7 @@ function renderSessionsFragment(sessions: SessionStats[], summary: TokenSummary,
   return `<div class="two-col">${leftPanel}${rightPanel}</div>`
 }
 
-function renderHTML(sessions: SessionStats[], summary: TokenSummary, daily: DailyTokens[]): string {
+function renderHTML(sessions: SessionStats[], summary: TokenSummary, daily: DailyTokens[], dailyModel: DailyModelTokens[], toolGroups: ToolGroupSummary[]): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1080,7 +852,7 @@ function renderHTML(sessions: SessionStats[], summary: TokenSummary, daily: Dail
     </div>
   </div>
   <div id="sessions">
-    ${renderSessionsFragment(sessions, summary, daily, getDailyTokensByModel())}
+    ${renderSessionsFragment(sessions, summary, daily, dailyModel, toolGroups)}
   </div>
   <script>
     function collectOpenToolGroups() {
@@ -1157,20 +929,22 @@ if (import.meta.main) {
   if (!portBusy) {
     // Initial aggregation on dashboard startup
     try {
-      const db = new Database(DB_PATH)
+      const repos = createSqliteRepos(DB_PATH)
       const today = new Date().toISOString().slice(0, 10)
       const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-      recomputeDailyUsage(db, sevenDaysAgo, today)
+      repos.dailyUsage.recompute(sevenDaysAgo, today)
       lastAggregation = Date.now()
 
       // Run GC on startup
-      gcOldData(db, 90)
+      gcOldData(repos, 90)
       lastGC = Date.now()
 
-      db.close()
+      repos.close()
     } catch (e) {
       console.error("Initial aggregation/GC failed:", e)
     }
+
+    const readRepos = createSqliteRepos(DB_PATH, { readonly: true })
 
     Bun.serve({
       port: PORT,
@@ -1184,11 +958,11 @@ if (import.meta.main) {
             if (now - lastAggregation >= MIN_AGGREGATION_INTERVAL_MS) {
               lastAggregation = now
               try {
-                const db = new Database(DB_PATH)
+                const repos = createSqliteRepos(DB_PATH)
                 const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
                 const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-                recomputeDailyUsage(db, sevenDaysAgo, yesterday)
-                db.close()
+                repos.dailyUsage.recompute(sevenDaysAgo, yesterday)
+                repos.close()
               } catch (e) {
                 console.error("Background aggregation failed:", e)
               }
@@ -1201,9 +975,9 @@ if (import.meta.main) {
             if (now - lastGC >= MIN_GC_INTERVAL_MS) {
               lastGC = now
               try {
-                const db = new Database(DB_PATH)
-                gcOldData(db, 90)
-                db.close()
+                const repos = createSqliteRepos(DB_PATH)
+                gcOldData(repos, 90)
+                repos.close()
               } catch (e) {
                 console.error("Background GC failed:", e)
               }
@@ -1211,7 +985,12 @@ if (import.meta.main) {
           }
 
           try {
-            return new Response(renderSessionsFragment(getStats(), getTokenSummary(), getDailyTokens(), getDailyTokensByModel()), {
+            const sessions = getStats(readRepos)
+            const summary = getTokenSummary(readRepos)
+            const daily = getDailyTokens(readRepos)
+            const dailyModel = getDailyTokensByModel(readRepos)
+            const toolGroups = getToolUsageSummary(readRepos)
+            return new Response(renderSessionsFragment(sessions, summary, daily, dailyModel, toolGroups), {
               headers: { "Content-Type": "text/html; charset=utf-8" },
             })
           } catch (e) {
@@ -1222,7 +1001,12 @@ if (import.meta.main) {
         }
 
         try {
-          return new Response(renderHTML(getStats(), getTokenSummary(), getDailyTokens()), {
+          const sessions = getStats(readRepos)
+          const summary = getTokenSummary(readRepos)
+          const daily = getDailyTokens(readRepos)
+          const dailyModel = getDailyTokensByModel(readRepos)
+          const toolGroups = getToolUsageSummary(readRepos)
+          return new Response(renderHTML(sessions, summary, daily, dailyModel, toolGroups), {
             headers: { "Content-Type": "text/html; charset=utf-8" },
           })
         } catch (e) {
