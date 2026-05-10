@@ -7,6 +7,7 @@ function makeStubRepos(): Repos {
     sessions: {
       getRootSessions: () => [],
       getChildSessions: () => [],
+      getDistinctDirectories: () => [],
       upsert: () => {},
       upsertFull: () => {},
       deleteOrphaned: () => 0,
