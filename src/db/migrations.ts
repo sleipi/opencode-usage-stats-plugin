@@ -92,6 +92,11 @@ export const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_sessions_first_seen ON sessions(first_seen)`,
     );
   },
+  (db) => {
+    db.run(
+      `CREATE INDEX IF NOT EXISTS idx_sessions_last_seen ON sessions(last_seen)`,
+    );
+  },
 ];
 
 export function getSchemaVersion(): number {

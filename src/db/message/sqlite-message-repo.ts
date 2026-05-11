@@ -10,6 +10,8 @@ import type {
 
 export class SqliteMessageRepo implements MessageRepo {
   private readonly upsertMessageStmt;
+  private readonly tokenSummaryStmt;
+  private readonly todayTokensStmt;
 
   constructor(private readonly db: Database) {
     this.upsertMessageStmt = this.db.prepare(`
@@ -27,6 +29,28 @@ export class SqliteMessageRepo implements MessageRepo {
         cache_write_tokens = excluded.cache_write_tokens,
         cost = excluded.cost,
         agent = COALESCE(excluded.agent, messages.agent)
+    `);
+
+    this.tokenSummaryStmt = this.db.prepare(`
+      SELECT
+        COALESCE(SUM(CASE WHEN timestamp >= date('now') AND timestamp < date('now', '+1 day')
+          THEN input_tokens + cache_read_tokens + output_tokens + reasoning_tokens END), 0) AS today,
+        COALESCE(SUM(CASE WHEN timestamp >= date('now', 'weekday 1', '-7 days')
+          THEN input_tokens + cache_read_tokens + output_tokens + reasoning_tokens END), 0) AS this_week,
+        COALESCE(SUM(CASE WHEN timestamp >= date('now', 'start of month')
+          THEN input_tokens + cache_read_tokens + output_tokens + reasoning_tokens END), 0) AS this_month,
+        COALESCE(SUM(CASE WHEN timestamp >= date('now', 'start of month', '-1 month')
+                       AND timestamp < date('now', 'start of month')
+          THEN input_tokens + cache_read_tokens + output_tokens + reasoning_tokens END), 0) AS last_month
+      FROM messages
+      WHERE timestamp >= date('now', 'start of month', '-1 month')
+    `);
+
+    this.todayTokensStmt = this.db.prepare(`
+      SELECT ? AS date,
+             COALESCE(SUM(input_tokens + cache_read_tokens + output_tokens + reasoning_tokens), 0) AS total
+      FROM messages
+      WHERE timestamp >= ? AND timestamp < date(?, '+1 day')
     `);
   }
 
@@ -65,35 +89,22 @@ export class SqliteMessageRepo implements MessageRepo {
   }
 
   getTokenSummary(): TokenSummary {
-    const sum = (where: string): number => {
-      const row = this.db
-        .prepare(`
-        SELECT COALESCE(SUM(input_tokens + cache_read_tokens + output_tokens + reasoning_tokens), 0) AS total
-        FROM messages WHERE ${where}
-      `)
-        .get() as { total?: number };
-      return Number(row?.total ?? 0);
+    const row = this.tokenSummaryStmt.get() as {
+      today: number;
+      this_week: number;
+      this_month: number;
+      last_month: number;
     };
-
     return {
-      today: sum("date(timestamp) = date('now')"),
-      thisWeek: sum("timestamp >= date('now', 'weekday 1', '-7 days')"),
-      thisMonth: sum("timestamp >= date('now', 'start of month')"),
-      lastMonth: sum(
-        "timestamp >= date('now', 'start of month', '-1 month') AND timestamp < date('now', 'start of month')",
-      ),
+      today: Number(row.today),
+      thisWeek: Number(row.this_week),
+      thisMonth: Number(row.this_month),
+      lastMonth: Number(row.last_month),
     };
   }
 
   getTodayTokens(today: string): DailyTokens {
-    return this.db
-      .prepare(`
-      SELECT ? AS date,
-             COALESCE(SUM(input_tokens + cache_read_tokens + output_tokens + reasoning_tokens), 0) AS total
-      FROM messages
-      WHERE date(timestamp) = ?
-    `)
-      .get(today, today) as DailyTokens;
+    return this.todayTokensStmt.get(today, today, today) as DailyTokens;
   }
 
   getDailyTokensByModel(): DailyModelTokens[] {
@@ -112,7 +123,7 @@ export class SqliteMessageRepo implements MessageRepo {
 
   deleteOlderThan(cutoffDate: string): number {
     const result = this.db
-      .prepare("DELETE FROM messages WHERE date(timestamp) < ?")
+      .prepare("DELETE FROM messages WHERE timestamp < ?")
       .run(cutoffDate);
     return result.changes;
   }
