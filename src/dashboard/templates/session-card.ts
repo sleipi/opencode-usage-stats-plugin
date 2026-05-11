@@ -6,9 +6,11 @@ function recencyClass(lastSeen: string | null | undefined): string {
   const iso = `${lastSeen.replace(" ", "T")}Z`;
   const ageSec = (Date.now() - Date.parse(iso)) / 1000;
   if (Number.isNaN(ageSec) || ageSec < 0) return "";
-  if (ageSec < 30) return "session-card--active";
-  if (ageSec < 120) return "session-card--recent";
-  if (ageSec < 600) return "session-card--idle";
+  if (ageSec < 300) return "session-card--active";
+  if (ageSec < 3600) return "session-card--recent";
+  if (ageSec < 28800) return "session-card--idle";
+  if (ageSec < 57600) return "session-card--stale";
+  if (ageSec < 86400) return "session-card--old";
   return "";
 }
 

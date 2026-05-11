@@ -299,7 +299,13 @@ export const DASHBOARD_CSS = `
       border-color: #3fb950;
     }
     .session-card--idle {
+      border-color: #2ea043;
+    }
+    .session-card--stale {
       border-color: #1a4d1f;
+    }
+    .session-card--old {
+      border-color: #1a3a1f;
     }
     #dir-filter {
       appearance: none;
