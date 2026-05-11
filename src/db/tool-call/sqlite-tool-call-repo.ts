@@ -3,17 +3,52 @@ import type {
   AgentCallRow,
   ToolCallData,
   ToolCallRepo,
-  ToolCountSummary,
   ToolGroupSummary,
 } from "./tool-call-repo";
 
 export class SqliteToolCallRepo implements ToolCallRepo {
   private readonly insertToolCallStmt;
+  private readonly toolUsageSummaryStmt;
 
   constructor(private readonly db: Database) {
     this.insertToolCallStmt = this.db.prepare(`
       INSERT OR IGNORE INTO tool_calls (session_id, call_id, tool_name, agent_type, description, agent, model_id, provider_id)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    this.toolUsageSummaryStmt = this.db.prepare(`
+      WITH resolved AS (
+        SELECT
+          tc.tool_name,
+          tc.timestamp,
+          COALESCE(tc.agent,
+            (SELECT m.agent FROM messages m
+             WHERE m.session_id = tc.session_id AND m.agent IS NOT NULL
+             ORDER BY m.timestamp DESC LIMIT 1)) AS agent,
+          COALESCE(tc.provider_id,
+            (SELECT m.provider_id FROM messages m
+             WHERE m.session_id = tc.session_id AND m.provider_id IS NOT NULL
+             ORDER BY m.timestamp DESC LIMIT 1)) AS provider_id,
+          COALESCE(tc.model_id,
+            (SELECT m.model_id FROM messages m
+             WHERE m.session_id = tc.session_id AND m.model_id IS NOT NULL
+             ORDER BY m.timestamp DESC LIMIT 1)) AS model_id
+        FROM tool_calls tc
+      )
+      SELECT
+        agent,
+        provider_id,
+        model_id,
+        tool_name,
+        MAX(timestamp) AS latest_timestamp,
+        SUM(CASE WHEN timestamp >= date('now') AND timestamp < date('now', '+1 day') THEN 1 ELSE 0 END) AS today,
+        SUM(CASE WHEN timestamp >= date('now', 'weekday 1', '-7 days') THEN 1 ELSE 0 END) AS this_week,
+        SUM(CASE WHEN timestamp >= date('now', 'start of month') THEN 1 ELSE 0 END) AS this_month,
+        SUM(CASE WHEN timestamp >= date('now', 'start of month', '-1 month')
+                  AND timestamp < date('now', 'start of month') THEN 1 ELSE 0 END) AS last_month
+      FROM resolved
+      GROUP BY agent, provider_id, model_id, tool_name
+      ORDER BY agent, provider_id, model_id
     `);
   }
 
@@ -42,102 +77,59 @@ export class SqliteToolCallRepo implements ToolCallRepo {
   }
 
   getToolUsageSummary(): ToolGroupSummary[] {
-    const timeFilters = {
-      today: "date(tc.timestamp) = date('now')",
-      thisWeek: "tc.timestamp >= date('now', 'weekday 1', '-7 days')",
-      thisMonth: "tc.timestamp >= date('now', 'start of month')",
-      lastMonth:
-        "tc.timestamp >= date('now', 'start of month', '-1 month') AND tc.timestamp < date('now', 'start of month')",
-    };
+    interface FlatRow {
+      agent: string | null;
+      provider_id: string | null;
+      model_id: string | null;
+      tool_name: string;
+      latest_timestamp: string | null;
+      today: number;
+      this_week: number;
+      this_month: number;
+      last_month: number;
+    }
 
-    const groups = this.db
-      .prepare(`
-      SELECT DISTINCT
-        COALESCE(tc.agent,
-          (SELECT m.agent FROM messages m WHERE m.session_id = tc.session_id AND m.agent IS NOT NULL ORDER BY m.timestamp DESC LIMIT 1),
-          '__none__') AS agent,
-        COALESCE(tc.provider_id,
-          (SELECT m.provider_id FROM messages m WHERE m.session_id = tc.session_id AND m.provider_id IS NOT NULL ORDER BY m.timestamp DESC LIMIT 1),
-          '__none__') AS provider_id,
-        COALESCE(tc.model_id,
-          (SELECT m.model_id FROM messages m WHERE m.session_id = tc.session_id AND m.model_id IS NOT NULL ORDER BY m.timestamp DESC LIMIT 1),
-          '__none__') AS model_id
-      FROM tool_calls tc
-      ORDER BY agent, provider_id, model_id
-    `)
-      .all() as { agent: string; provider_id: string; model_id: string }[];
+    const rows = this.toolUsageSummaryStmt.all() as FlatRow[];
 
-    const results: ToolGroupSummary[] = [];
+    const groupMap = new Map<string, ToolGroupSummary>();
 
-    for (const group of groups) {
-      const agentVal = group.agent === "__none__" ? null : group.agent;
-      const providerVal =
-        group.provider_id === "__none__" ? null : group.provider_id;
-      const modelVal = group.model_id === "__none__" ? null : group.model_id;
-
-      const escapeSql = (v: string): string => v.replaceAll("'", "''");
-      const agentFilter =
-        agentVal === null
-          ? "tc.agent IS NULL AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.session_id = tc.session_id AND m.agent IS NOT NULL)"
-          : `COALESCE(tc.agent, (SELECT m.agent FROM messages m WHERE m.session_id = tc.session_id AND m.agent IS NOT NULL ORDER BY m.timestamp DESC LIMIT 1)) = '${escapeSql(agentVal)}'`;
-      const providerFilter =
-        providerVal === null
-          ? "tc.provider_id IS NULL AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.session_id = tc.session_id AND m.provider_id IS NOT NULL)"
-          : `COALESCE(tc.provider_id, (SELECT m.provider_id FROM messages m WHERE m.session_id = tc.session_id AND m.provider_id IS NOT NULL ORDER BY m.timestamp DESC LIMIT 1)) = '${escapeSql(providerVal)}'`;
-      const modelFilter =
-        modelVal === null
-          ? "tc.model_id IS NULL AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.session_id = tc.session_id AND m.model_id IS NOT NULL)"
-          : `COALESCE(tc.model_id, (SELECT m.model_id FROM messages m WHERE m.session_id = tc.session_id AND m.model_id IS NOT NULL ORDER BY m.timestamp DESC LIMIT 1)) = '${escapeSql(modelVal)}'`;
-
-      const groupWhere = `${agentFilter} AND ${providerFilter} AND ${modelFilter}`;
-      const toolRows: Record<string, ToolCountSummary> = {};
-
-      for (const [period, timeWhere] of Object.entries(timeFilters)) {
-        const rows = this.db
-          .prepare(`
-          SELECT tc.tool_name, COUNT(*) AS cnt
-          FROM tool_calls tc
-          WHERE ${groupWhere} AND ${timeWhere}
-          GROUP BY tc.tool_name
-        `)
-          .all() as { tool_name: string; cnt: number }[];
-
-        for (const row of rows) {
-          if (!toolRows[row.tool_name]) {
-            toolRows[row.tool_name] = {
-              tool_name: row.tool_name,
-              today: 0,
-              thisWeek: 0,
-              thisMonth: 0,
-              lastMonth: 0,
-            };
-          }
-          toolRows[row.tool_name]![
-            period as keyof Omit<ToolCountSummary, "tool_name">
-          ] = row.cnt;
-        }
+    for (const row of rows) {
+      const key = `${row.agent ?? "__none__"}|${row.provider_id ?? "__none__"}|${row.model_id ?? "__none__"}`;
+      let group = groupMap.get(key);
+      if (!group) {
+        group = {
+          agent: row.agent ?? null,
+          provider_id: row.provider_id ?? null,
+          model_id: row.model_id ?? null,
+          latest_timestamp: row.latest_timestamp ?? null,
+          tools: [],
+        };
+        groupMap.set(key, group);
       }
 
-      const tools = Object.values(toolRows).sort(
+      if (
+        row.latest_timestamp &&
+        (!group.latest_timestamp ||
+          row.latest_timestamp > group.latest_timestamp)
+      ) {
+        group.latest_timestamp = row.latest_timestamp;
+      }
+
+      group.tools.push({
+        tool_name: row.tool_name,
+        today: row.today,
+        thisWeek: row.this_week,
+        thisMonth: row.this_month,
+        lastMonth: row.last_month,
+      });
+    }
+
+    const results = Array.from(groupMap.values());
+
+    for (const group of results) {
+      group.tools.sort(
         (a, b) => b.thisMonth + b.lastMonth - (a.thisMonth + a.lastMonth),
       );
-      const latestRow = this.db
-        .prepare(`
-        SELECT MAX(tc.timestamp) AS latest_timestamp
-        FROM tool_calls tc
-        WHERE ${groupWhere}
-      `)
-        .get() as { latest_timestamp: string | null };
-
-      if (tools.length > 0) {
-        results.push({
-          agent: agentVal,
-          provider_id: providerVal,
-          model_id: modelVal,
-          latest_timestamp: latestRow?.latest_timestamp ?? null,
-          tools,
-        });
-      }
     }
 
     results.sort((a, b) => {
@@ -154,7 +146,7 @@ export class SqliteToolCallRepo implements ToolCallRepo {
 
   deleteOlderThan(cutoffDate: string): number {
     const result = this.db
-      .prepare("DELETE FROM tool_calls WHERE date(timestamp) < ?")
+      .prepare("DELETE FROM tool_calls WHERE timestamp < ?")
       .run(cutoffDate);
     return result.changes;
   }

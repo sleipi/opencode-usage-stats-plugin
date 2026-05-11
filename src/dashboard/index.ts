@@ -35,12 +35,15 @@ export function createDashboard(deps: DashboardDeps) {
       const dailyTokens = createDailyTokensService(readRepos);
 
       const routes = [
-        createStatsRoute(sessionStats, dailyTokens, readRepos, maintenance),
+        createStatsRoute(sessionStats, dailyTokens, readRepos),
         createDirectoriesRoute(sessionStats),
         createPageRoute(sessionStats, dailyTokens, readRepos),
       ];
 
       startServer(port, routes);
+
+      setInterval(() => maintenance.maybeAggregate(), 60_000);
+      setInterval(() => maintenance.maybeGC(), 60_000);
     },
   };
 }

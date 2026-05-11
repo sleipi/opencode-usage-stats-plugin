@@ -3,7 +3,6 @@ import { createDirectoriesRoute } from "../../../src/dashboard/routes/directorie
 import { createPageRoute } from "../../../src/dashboard/routes/page-route";
 import { createStatsRoute } from "../../../src/dashboard/routes/stats-route";
 import type { DailyTokensService } from "../../../src/dashboard/services/daily-tokens-service";
-import type { MaintenanceService } from "../../../src/dashboard/services/maintenance-service";
 import type { SessionStatsService } from "../../../src/dashboard/services/session-stats-service";
 import type { Repos } from "../../../src/db/repos";
 
@@ -21,14 +20,6 @@ function makeStubDailyTokens(): DailyTokensService {
       thisMonth: 0,
       lastMonth: 0,
     }),
-  };
-}
-
-function makeStubMaintenance(): MaintenanceService {
-  return {
-    runInitial: () => {},
-    maybeAggregate: () => {},
-    maybeGC: () => {},
   };
 }
 
@@ -76,7 +67,6 @@ describe("StatsRoute", () => {
       makeStubSessionStats(),
       makeStubDailyTokens(),
       makeStubRepos(),
-      makeStubMaintenance(),
     );
     expect(route.match(new URL("http://localhost/api/stats"))).toBe(true);
     expect(route.match(new URL("http://localhost/"))).toBe(false);
@@ -87,36 +77,11 @@ describe("StatsRoute", () => {
       makeStubSessionStats(),
       makeStubDailyTokens(),
       makeStubRepos(),
-      makeStubMaintenance(),
     );
     const req = new Request("http://localhost/api/stats");
     const res = route.handle(req, new URL(req.url));
     expect(res.headers.get("Content-Type")).toContain("text/html");
   });
-
-  test("calls maintenance on each request", () => {
-    let aggregateCalled = false;
-    let gcCalled = false;
-    const maintenance = makeStubMaintenance();
-    maintenance.maybeAggregate = () => {
-      aggregateCalled = true;
-    };
-    maintenance.maybeGC = () => {
-      gcCalled = true;
-    };
-
-    const route = createStatsRoute(
-      makeStubSessionStats(),
-      makeStubDailyTokens(),
-      makeStubRepos(),
-      maintenance,
-    );
-    const req = new Request("http://localhost/api/stats");
-    route.handle(req, new URL(req.url));
-    expect(aggregateCalled).toBe(true);
-    expect(gcCalled).toBe(true);
-  });
-
   test("returns error HTML on DB failure", () => {
     const sessionStats: SessionStatsService = {
       getSessionStats: () => {
@@ -130,11 +95,87 @@ describe("StatsRoute", () => {
       sessionStats,
       makeStubDailyTokens(),
       makeStubRepos(),
-      makeStubMaintenance(),
     );
     const req = new Request("http://localhost/api/stats");
     const res = route.handle(req, new URL(req.url));
     expect(res.status).toBe(200);
+  });
+
+  test("serves cached response within TTL", async () => {
+    let callCount = 0;
+    const sessionStats: SessionStatsService = {
+      getSessionStats: () => {
+        callCount++;
+        return [];
+      },
+      getDistinctDirectories: () => [],
+    };
+    const route = createStatsRoute(
+      sessionStats,
+      makeStubDailyTokens(),
+      makeStubRepos(),
+    );
+    const url = new URL("http://localhost/api/stats");
+    const req1 = new Request(url.toString());
+    const res1 = route.handle(req1, url);
+    const body1 = await res1.text();
+
+    const req2 = new Request(url.toString());
+    const res2 = route.handle(req2, url);
+    const body2 = await res2.text();
+
+    expect(callCount).toBe(1);
+    expect(body1).toBe(body2);
+  });
+
+  test("refreshes cache after TTL expires", async () => {
+    let callCount = 0;
+    const sessionStats: SessionStatsService = {
+      getSessionStats: () => {
+        callCount++;
+        return [];
+      },
+      getDistinctDirectories: () => [],
+    };
+    const route = createStatsRoute(
+      sessionStats,
+      makeStubDailyTokens(),
+      makeStubRepos(),
+      { cacheTtlMs: 1 },
+    );
+    const url = new URL("http://localhost/api/stats");
+
+    route.handle(new Request(url.toString()), url);
+    expect(callCount).toBe(1);
+
+    await new Promise((r) => setTimeout(r, 5));
+
+    route.handle(new Request(url.toString()), url);
+    expect(callCount).toBe(2);
+  });
+
+  test("caches separately per directory filter", () => {
+    let lastDir: string | undefined;
+    const sessionStats: SessionStatsService = {
+      getSessionStats: (dir) => {
+        lastDir = dir;
+        return [];
+      },
+      getDistinctDirectories: () => [],
+    };
+    const route = createStatsRoute(
+      sessionStats,
+      makeStubDailyTokens(),
+      makeStubRepos(),
+    );
+
+    const url1 = new URL("http://localhost/api/stats?dir=/a");
+    route.handle(new Request(url1.toString()), url1);
+    expect(lastDir).toBe("/a");
+
+    const url2 = new URL("http://localhost/api/stats?dir=/b");
+    route.handle(new Request(url2.toString()), url2);
+    expect(lastDir).toBe("/b");
   });
 });
 

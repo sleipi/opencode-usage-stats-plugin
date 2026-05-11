@@ -12,6 +12,8 @@ function setupConnection(db: Database, readonly: boolean): void {
     db.run("PRAGMA journal_mode = WAL");
     db.run("PRAGMA synchronous = NORMAL");
   }
+  db.run("PRAGMA mmap_size = 268435456"); // 256MB; OS only maps pages actually read
+  db.run("PRAGMA cache_size = -8000"); // 8MB page cache
 }
 
 function assertReadableVersion(db: Database): void {
