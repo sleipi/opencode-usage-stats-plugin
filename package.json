@@ -1,6 +1,6 @@
 {
   "name": "@sleipi/opencode-usage-stats",
-  "version": "0.1.0",
+  "version": "0.0.0-dev",
   "description": "Usage statistics tracking and dashboard for OpenCode",
   "type": "module",
   "main": "./src/plugin.ts",
