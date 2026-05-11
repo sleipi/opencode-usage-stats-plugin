@@ -105,19 +105,53 @@ describe("renderSessionCard", () => {
     expect(html).toContain("anthropic / claude-sonnet");
   });
 
-  test("adds active recency class for very recent sessions", () => {
+  test("adds active recency class for sessions < 5 min old", () => {
     const now = new Date();
     const lastSeen = now.toISOString().replace("T", " ").slice(0, 19);
     const html = renderSessionCard(makeSession({ last_seen: lastSeen }));
     expect(html).toContain("session-card--active");
   });
 
-  test("no recency class for old sessions", () => {
+  test("adds recent recency class for sessions < 1 h old", () => {
+    const seen = new Date(Date.now() - 10 * 60 * 1000);
+    const lastSeen = seen.toISOString().replace("T", " ").slice(0, 19);
+    const html = renderSessionCard(makeSession({ last_seen: lastSeen }));
+    expect(html).toContain("session-card--recent");
+    expect(html).not.toContain("session-card--active");
+  });
+
+  test("adds idle recency class for sessions < 8 h old", () => {
+    const seen = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    const lastSeen = seen.toISOString().replace("T", " ").slice(0, 19);
+    const html = renderSessionCard(makeSession({ last_seen: lastSeen }));
+    expect(html).toContain("session-card--idle");
+    expect(html).not.toContain("session-card--recent");
+  });
+
+  test("adds stale recency class for sessions < 16 h old", () => {
+    const seen = new Date(Date.now() - 10 * 60 * 60 * 1000);
+    const lastSeen = seen.toISOString().replace("T", " ").slice(0, 19);
+    const html = renderSessionCard(makeSession({ last_seen: lastSeen }));
+    expect(html).toContain("session-card--stale");
+    expect(html).not.toContain("session-card--idle");
+  });
+
+  test("adds old recency class for sessions < 24 h old", () => {
+    const seen = new Date(Date.now() - 20 * 60 * 60 * 1000);
+    const lastSeen = seen.toISOString().replace("T", " ").slice(0, 19);
+    const html = renderSessionCard(makeSession({ last_seen: lastSeen }));
+    expect(html).toContain("session-card--old");
+    expect(html).not.toContain("session-card--stale");
+  });
+
+  test("no recency class for sessions >= 24 h old", () => {
     const html = renderSessionCard(
       makeSession({ last_seen: "2020-01-01 00:00:00" }),
     );
     expect(html).not.toContain("session-card--active");
     expect(html).not.toContain("session-card--recent");
     expect(html).not.toContain("session-card--idle");
+    expect(html).not.toContain("session-card--stale");
+    expect(html).not.toContain("session-card--old");
   });
 });
