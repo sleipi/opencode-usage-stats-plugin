@@ -23,7 +23,10 @@ Main files in `src/`:
 - **`plugin.ts`** — OpenCode event plugin entrypoint; wires dependencies and hook handlers.
 - **`context/session-context.ts`** — shared per-session context (agent/model/project tracking).
 - **`handlers/`** — focused hook handlers (`chat-params`, `tool-execute`, `event`) and hook/event types.
+- **`config.ts`** — configuration loader; reads `~/.config/opencode/usage-stats.json[c]` with env-var fallback.
 - **`dashboard.ts`** — standalone HTTP server serving a browser dashboard with auto-refresh.
+
+The dashboard can auto-start with the plugin when `dashboardEnabled` is `true` (the default). Port and enablement are controlled via config file or environment variables (see README).
 
 Data lives at `~/.config/opencode/usage-stats.db` (not in repo). Four tables: `sessions`, `messages`, `tool_calls`, `daily_usage`.
 

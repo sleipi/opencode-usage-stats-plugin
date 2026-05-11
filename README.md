@@ -1,8 +1,8 @@
 # opencode-usage-stats
 
-Usage statistics tracking and dashboard plugin for [OpenCode](https://opencode.ai).
+Where do all your tokens go? Find out with a real-time dashboard that tracks every token, model, and session across your [OpenCode](https://opencode.ai) projects.
 
-Tracks token usage, costs, model selection, and agent activity across sessions. Provides a browser-based dashboard for reviewing your usage.
+![Dashboard screenshot](assets/screenshot/plugin-0-2-0.png)
 
 ## Features
 
@@ -10,8 +10,7 @@ Tracks token usage, costs, model selection, and agent activity across sessions. 
 - **Session tracking** — titles, directories, timestamps, parent/child relationships
 - **Agent tracking** — subagent types (explore, product-manager, software-architect, etc.) with per-agent token breakdowns
 - **Cost tracking** — per-message cost as reported by the provider
-- **Dashboard** — dark-themed browser UI at `localhost:3333` with auto-refresh
-- **Token summary** — today, this week, this month, last month totals
+- **Local storage** — all data stored in a single SQLite file (`~/.config/opencode/usage-stats.db`), no external services
 
 ## Requirements
 
@@ -39,18 +38,40 @@ bun install
 ln -s "$(pwd)/src/plugin.ts" ~/.config/opencode/plugins/opencode-usage-stats.ts
 ```
 
+## Configuration
+
+The plugin reads configuration from `~/.config/opencode/usage-stats.jsonc` (or `.json`). If no config file is found, environment variables are used as fallback.
+
+Example config file:
+
+```jsonc
+{
+  // Start the dashboard automatically when the plugin loads (default: true)
+  "dashboardEnabled": true,
+  // Port for the dashboard web server (default: 3333)
+  "dashboardPort": 3333
+}
+```
+
+Environment variable fallbacks (for backward compatibility):
+
+| Variable | Description | Default |
+|---|---|---|
+| `OPENCODE_USAGE_STATS_DASHBOARD` | Set to `"false"` to disable auto-start | `true` |
+| `OPENCODE_USAGE_STATS_PORT` | Dashboard port | `3333` |
+
 ## Dashboard
 
-Start the dashboard:
+By default the dashboard starts automatically with the plugin. To run it manually instead, disable auto-start in the config and use:
 
 ```bash
 bunx @sleipi/opencode-usage-stats
 ```
 
-Or with a custom port (default is 3333):
+Or with a custom port:
 
 ```bash
-PORT=3334 bunx @sleipi/opencode-usage-stats
+OPENCODE_USAGE_STATS_PORT=3334 bunx @sleipi/opencode-usage-stats
 ```
 
 Opens at [http://localhost:3333](http://localhost:3333).
@@ -60,37 +81,13 @@ The dashboard auto-refreshes every 5 seconds and shows:
 - Session cards with token breakdown and agent details
 - Cache hit percentages with explanatory tooltips
 
-## Data Storage
+## Development
 
-All data is stored in `~/.config/opencode/usage-stats.db` (SQLite). This file is not part of the repository.
-
-For tests, you can override the DB path via `OPENCODE_USAGE_STATS_DB`.
-
-Tables:
-- `sessions` — session metadata (title, directory, parent_id, timestamps)
-- `messages` — per-message token counts, model, provider, cost
-- `tool_calls` — tool invocations with agent type tracking
-
-## How It Works
-
-The plugin hooks into OpenCode's `event` system:
-- `session.created` / `session.updated` — tracks session metadata and parent/child relationships
-- `message.updated` — captures token counts, model, provider, and cost per assistant message
-
-Subagent tokens are aggregated into their parent session in the dashboard via `parent_id` linking.
-
-## Testing
-
-Run unit tests:
+See [AGENTS.md](AGENTS.md) for coding standards, test commands, and architecture details.
 
 ```bash
-bun test tests/unit
-```
-
-Run end-to-end tests (Playwright):
-
-```bash
-bun run test:e2e
+bun test tests/unit     # unit tests
+bun run test:e2e        # Playwright e2e tests
 ```
 
 ## License
