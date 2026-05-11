@@ -20,33 +20,37 @@ Tracks token usage, costs, model selection, and agent activity across sessions. 
 
 ## Installation
 
-```bash
-git clone https://github.com/sleipi/opencode-usage-stats.git
-cd opencode-usage-stats
-bun install
-```
+Add the plugin to your `opencode.json`:
 
-### Symlink into OpenCode plugins
-
-```bash
-ln -s "$(pwd)/src/plugin.ts" ~/.config/opencode/plugins/opencode-usage-stats.ts
-ln -s "$(pwd)/src/dashboard.ts" ~/.config/opencode/plugins/usage-stats-dashboard.ts
+```json
+{
+  "plugin": ["@sleipi/opencode-usage-stats"]
+}
 ```
 
 Restart OpenCode to load the plugin. The plugin starts tracking immediately.
 
-## Dashboard
-
-Start the dashboard manually:
+### Manual installation (alternative)
 
 ```bash
-bun run dashboard
+git clone https://github.com/sleipi/opencode-usage-stats-plugin.git
+cd opencode-usage-stats-plugin
+bun install
+ln -s "$(pwd)/src/plugin.ts" ~/.config/opencode/plugins/opencode-usage-stats.ts
 ```
 
-Use a custom port if 3333 is already occupied by OpenCode itself:
+## Dashboard
+
+Start the dashboard:
 
 ```bash
-PORT=3334 bun run dashboard
+bunx @sleipi/opencode-usage-stats
+```
+
+Or with a custom port (default is 3333):
+
+```bash
+PORT=3334 bunx @sleipi/opencode-usage-stats
 ```
 
 Opens at [http://localhost:3333](http://localhost:3333).

@@ -1,8 +1,25 @@
 {
-  "name": "opencode-usage-stats",
+  "name": "@sleipi/opencode-usage-stats",
   "version": "0.1.0",
   "description": "Usage statistics tracking and dashboard for OpenCode",
   "type": "module",
+  "main": "./src/plugin.ts",
+  "exports": {
+    ".": "./src/plugin.ts"
+  },
+  "bin": {
+    "opencode-usage-stats": "./src/dashboard.ts"
+  },
+  "files": [
+    "src/"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sleipi/opencode-usage-stats-plugin.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "dashboard": "bun --watch run src/dashboard.ts",
     "check": "biome check .",
