@@ -4,6 +4,7 @@
 
 ## Completed
 
+- [x] Display cost summary in dashboard stats bar (Overall$) and session cards
 - [x] Add comprehensive end-to-end tests for dashboard
 - [x] Auto-set npm version from release tag in CI publish workflow
 - [x] Optimize dashboard refresh performance (>500ms to ~140ms)
