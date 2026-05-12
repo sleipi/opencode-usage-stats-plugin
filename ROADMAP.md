@@ -4,6 +4,7 @@
 
 ## Completed
 
+- [x] Deduplicate DB schema: e2e seeders now reuse `migrate()` from `src/db/migrations.ts` instead of inline CREATE TABLE statements
 - [x] Display cost summary in dashboard stats bar (Overall$) and session cards
 - [x] Add comprehensive end-to-end tests for dashboard
 - [x] Auto-set npm version from release tag in CI publish workflow
