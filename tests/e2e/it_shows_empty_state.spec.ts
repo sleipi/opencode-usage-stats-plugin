@@ -78,7 +78,7 @@ test.describe("empty state", () => {
 
     await page.goto("/");
 
-    await expect(page.locator(".stats-bar")).toBeVisible();
+    await expect(page.locator(".stats-bar").first()).toBeVisible();
 
     await context.close();
   });

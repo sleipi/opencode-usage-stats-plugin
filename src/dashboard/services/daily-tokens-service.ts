@@ -1,4 +1,5 @@
 import type {
+  CostSummary,
   DailyModelTokens,
   TokenSummary,
 } from "../../db/message/message-repo";
@@ -9,6 +10,7 @@ export interface DailyTokensService {
   getDailyTokens(): DailyTokens[];
   getDailyTokensByModel(): DailyModelTokens[];
   getTokenSummary(): TokenSummary;
+  getCostSummary(): CostSummary;
 }
 
 export function createDailyTokensService(repos: Repos): DailyTokensService {
@@ -38,6 +40,10 @@ export function createDailyTokensService(repos: Repos): DailyTokensService {
 
     getTokenSummary(): TokenSummary {
       return repos.messages.getTokenSummary();
+    },
+
+    getCostSummary(): CostSummary {
+      return repos.messages.getCostSummary();
     },
   };
 }

@@ -129,6 +129,12 @@ function createReposDouble(opts?: {
       getTodayTokens: (today) => ({ date: today, total: 0 }),
       getDailyTokensByModel: () => [],
       deleteOlderThan: () => 0,
+      getCostSummary: () => ({
+        today: 0,
+        thisWeek: 0,
+        thisMonth: 0,
+        lastMonth: 0,
+      }),
     },
     toolCalls: {
       insert: (data) => toolInsert.impl(data),

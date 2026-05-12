@@ -22,6 +22,12 @@ export function fmt(n: number): string {
   return n.toLocaleString("de-DE");
 }
 
+export function fmtCost(n: number): string {
+  if (n <= 0) return "$0.00";
+  if (n < 0.01) return `$${n.toFixed(4)}`;
+  return `$${n.toFixed(2)}`;
+}
+
 export function renderTokens(
   input: number,
   cache: number,

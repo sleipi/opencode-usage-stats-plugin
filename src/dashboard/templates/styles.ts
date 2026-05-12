@@ -159,6 +159,8 @@ export const DASHBOARD_CSS = `
       margin: 16px 0;
     }
     .mode-overall { color: #58a6ff; border-color: #1f6feb; }
+    .mode-cost-overall { color: #f0883e; border-color: #d18616; }
+    .cost-value { color: #f0883e; }
     .tool-usage-section { margin-bottom: 8px; }
     .tool-group {
       margin-bottom: 12px;

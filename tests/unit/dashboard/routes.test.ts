@@ -20,6 +20,12 @@ function makeStubDailyTokens(): DailyTokensService {
       thisMonth: 0,
       lastMonth: 0,
     }),
+    getCostSummary: () => ({
+      today: 0,
+      thisWeek: 0,
+      thisMonth: 0,
+      lastMonth: 0,
+    }),
   };
 }
 
@@ -43,6 +49,12 @@ function makeStubRepos(): Repos {
       }),
       getTodayTokens: () => ({ date: "2025-01-01", total: 0 }),
       getDailyTokensByModel: () => [],
+      getCostSummary: () => ({
+        today: 0,
+        thisWeek: 0,
+        thisMonth: 0,
+        lastMonth: 0,
+      }),
       upsert: () => {},
       deleteOlderThan: () => 0,
     },

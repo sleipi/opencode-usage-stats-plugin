@@ -1,5 +1,5 @@
 import type { SessionStats } from "../services/types";
-import { esc, renderTokens } from "./formatters";
+import { esc, fmtCost, renderTokens } from "./formatters";
 
 function recencyClass(lastSeen: string | null | undefined): string {
   if (!lastSeen) return "";
@@ -88,6 +88,7 @@ export function renderSessionCard(s: SessionStats): string {
       <div class="session-tokens">
         <span class="token-label">Tokens:</span>
         ${sessionTokens}
+        ${s.cost > 0 ? `<span class="mode-cost">${fmtCost(s.cost)}</span>` : ""}
       </div>
       ${agentRows ? `<div class="agents-section"><div class="agents-label">Agents</div>${agentRows}</div>` : ""}
       ${modeRows ? `<div class="agents-section"><div class="agents-label">Mode</div>${modeRows}</div>` : ""}

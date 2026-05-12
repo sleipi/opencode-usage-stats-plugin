@@ -1,4 +1,5 @@
 import type {
+  CostSummary,
   DailyModelTokens,
   TokenSummary,
 } from "../../db/message/message-repo";
@@ -15,13 +16,14 @@ import { renderToolUsage } from "./tool-usage";
 export function renderSessionsFragment(
   sessions: SessionStats[],
   summary: TokenSummary,
+  costSummary: CostSummary,
   daily: DailyTokens[],
   dailyModel: DailyModelTokens[],
   toolGroups: ToolGroupSummary[],
   directories: string[] = [],
   selectedDir?: string,
 ): string {
-  const bar = renderStatsBar(summary);
+  const bar = renderStatsBar(summary, costSummary);
   const chart = renderDailyChart(daily);
   const modelChart = renderDailyModelChart(dailyModel);
   const toolUsage = renderToolUsage(toolGroups);

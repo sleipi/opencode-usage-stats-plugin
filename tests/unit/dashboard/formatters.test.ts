@@ -3,6 +3,7 @@ import {
   esc,
   fmt,
   fmtCompact,
+  fmtCost,
   renderTokens,
 } from "../../../src/dashboard/templates/formatters";
 
@@ -42,6 +43,27 @@ describe("formatters", () => {
       const result = fmt(1234);
       expect(result).toContain("1");
       expect(result).toContain("234");
+    });
+  });
+
+  describe("fmtCost", () => {
+    test("formats zero as $0.00", () => {
+      expect(fmtCost(0)).toBe("$0.00");
+    });
+
+    test("formats sub-cent values with 4 decimals", () => {
+      expect(fmtCost(0.0042)).toBe("$0.0042");
+      expect(fmtCost(0.0099)).toBe("$0.0099");
+    });
+
+    test("formats normal values with 2 decimals", () => {
+      expect(fmtCost(5.54)).toBe("$5.54");
+      expect(fmtCost(0.01)).toBe("$0.01");
+      expect(fmtCost(123.4)).toBe("$123.40");
+    });
+
+    test("formats negative values as $0.00", () => {
+      expect(fmtCost(-1)).toBe("$0.00");
     });
   });
 
