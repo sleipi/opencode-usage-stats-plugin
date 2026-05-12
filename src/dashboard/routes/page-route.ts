@@ -20,6 +20,7 @@ export function createPageRoute(
         const directories = sessionStats.getDistinctDirectories();
         const sessions = sessionStats.getSessionStats(dirFilter);
         const summary = dailyTokens.getTokenSummary();
+        const costSummary = dailyTokens.getCostSummary();
         const daily = dailyTokens.getDailyTokens();
         const dailyModel = dailyTokens.getDailyTokensByModel();
         const toolGroups = repos.toolCalls.getToolUsageSummary();
@@ -27,6 +28,7 @@ export function createPageRoute(
           renderHTML(
             sessions,
             summary,
+            costSummary,
             daily,
             dailyModel,
             toolGroups,

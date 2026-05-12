@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import type { DailyTokens } from "../shared-types";
 import type {
+  CostSummary,
   DailyModelTokens,
   MessageData,
   MessageRepo,
@@ -11,6 +12,7 @@ import type {
 export class SqliteMessageRepo implements MessageRepo {
   private readonly upsertMessageStmt;
   private readonly tokenSummaryStmt;
+  private readonly costSummaryStmt;
   private readonly todayTokensStmt;
 
   constructor(private readonly db: Database) {
@@ -42,6 +44,21 @@ export class SqliteMessageRepo implements MessageRepo {
         COALESCE(SUM(CASE WHEN timestamp >= date('now', 'start of month', '-1 month')
                        AND timestamp < date('now', 'start of month')
           THEN input_tokens + cache_read_tokens + output_tokens + reasoning_tokens END), 0) AS last_month
+      FROM messages
+      WHERE timestamp >= date('now', 'start of month', '-1 month')
+    `);
+
+    this.costSummaryStmt = this.db.prepare(`
+      SELECT
+        COALESCE(SUM(CASE WHEN timestamp >= date('now') AND timestamp < date('now', '+1 day')
+          THEN cost END), 0) AS today,
+        COALESCE(SUM(CASE WHEN timestamp >= date('now', 'weekday 1', '-7 days')
+          THEN cost END), 0) AS this_week,
+        COALESCE(SUM(CASE WHEN timestamp >= date('now', 'start of month')
+          THEN cost END), 0) AS this_month,
+        COALESCE(SUM(CASE WHEN timestamp >= date('now', 'start of month', '-1 month')
+                       AND timestamp < date('now', 'start of month')
+          THEN cost END), 0) AS last_month
       FROM messages
       WHERE timestamp >= date('now', 'start of month', '-1 month')
     `);
@@ -90,6 +107,21 @@ export class SqliteMessageRepo implements MessageRepo {
 
   getTokenSummary(): TokenSummary {
     const row = this.tokenSummaryStmt.get() as {
+      today: number;
+      this_week: number;
+      this_month: number;
+      last_month: number;
+    };
+    return {
+      today: Number(row.today),
+      thisWeek: Number(row.this_week),
+      thisMonth: Number(row.this_month),
+      lastMonth: Number(row.last_month),
+    };
+  }
+
+  getCostSummary(): CostSummary {
+    const row = this.costSummaryStmt.get() as {
       today: number;
       this_week: number;
       this_month: number;

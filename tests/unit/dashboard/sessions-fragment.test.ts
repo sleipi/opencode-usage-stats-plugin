@@ -10,13 +10,20 @@ describe("renderSessionsFragment", () => {
     lastMonth: 1500,
   };
 
+  const costSummary = {
+    today: 0,
+    thisWeek: 0,
+    thisMonth: 0,
+    lastMonth: 0,
+  };
+
   test("renders empty state when no sessions", () => {
-    const html = renderSessionsFragment([], summary, [], [], []);
+    const html = renderSessionsFragment([], summary, costSummary, [], [], []);
     expect(html).toContain("No sessions recorded yet.");
   });
 
   test("renders two-column layout", () => {
-    const html = renderSessionsFragment([], summary, [], [], []);
+    const html = renderSessionsFragment([], summary, costSummary, [], [], []);
     expect(html).toContain("two-col");
     expect(html).toContain("left-panel");
     expect(html).toContain("right-panel");
@@ -40,7 +47,14 @@ describe("renderSessionsFragment", () => {
         modes: [],
       },
     ];
-    const html = renderSessionsFragment(sessions, summary, [], [], []);
+    const html = renderSessionsFragment(
+      sessions,
+      summary,
+      costSummary,
+      [],
+      [],
+      [],
+    );
     expect(html).toContain("My Session");
     expect(html).toContain("session-card");
   });
@@ -49,6 +63,7 @@ describe("renderSessionsFragment", () => {
     const html = renderSessionsFragment(
       [],
       summary,
+      costSummary,
       [],
       [],
       [],
@@ -64,6 +79,7 @@ describe("renderSessionsFragment", () => {
     const html = renderSessionsFragment(
       [],
       summary,
+      costSummary,
       [],
       [],
       [],

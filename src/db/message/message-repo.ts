@@ -41,10 +41,18 @@ export interface DailyModelTokens {
   total: number;
 }
 
+export interface CostSummary {
+  today: number;
+  thisWeek: number;
+  thisMonth: number;
+  lastMonth: number;
+}
+
 export interface MessageRepo {
   upsert(data: MessageData): void;
   getModeStats(): ModeRow[];
   getTokenSummary(): TokenSummary;
+  getCostSummary(): CostSummary;
   getTodayTokens(today: string): DailyTokens;
   getDailyTokensByModel(): DailyModelTokens[];
   deleteOlderThan(cutoffDate: string): number;

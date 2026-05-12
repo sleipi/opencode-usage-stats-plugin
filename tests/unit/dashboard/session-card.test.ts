@@ -105,6 +105,18 @@ describe("renderSessionCard", () => {
     expect(html).toContain("anthropic / claude-sonnet");
   });
 
+  test("renders session-level cost in token line", () => {
+    const html = renderSessionCard(makeSession({ cost: 1.23 }));
+    expect(html).toContain("$1.23");
+    expect(html).toContain("mode-cost");
+  });
+
+  test("omits session-level cost when zero", () => {
+    const html = renderSessionCard(makeSession({ cost: 0 }));
+    const tokenLine = html.match(/<div class="session-tokens">[\s\S]*?<\/div>/);
+    expect(tokenLine?.[0]).not.toContain("mode-cost");
+  });
+
   test("adds active recency class for sessions < 5 min old", () => {
     const now = new Date();
     const lastSeen = now.toISOString().replace("T", " ").slice(0, 19);

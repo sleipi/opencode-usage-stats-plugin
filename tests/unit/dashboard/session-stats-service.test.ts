@@ -31,6 +31,12 @@ function makeStubRepos(
       getDailyTokensByModel: () => [],
       upsert: () => {},
       deleteOlderThan: () => 0,
+      getCostSummary: () => ({
+        today: 0,
+        thisWeek: 0,
+        thisMonth: 0,
+        lastMonth: 0,
+      }),
     },
     toolCalls: {
       getAgentCalls: () => overrides.agentCalls ?? [],

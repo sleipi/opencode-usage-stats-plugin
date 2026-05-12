@@ -1,4 +1,5 @@
 import type {
+  CostSummary,
   DailyModelTokens,
   TokenSummary,
 } from "../../db/message/message-repo";
@@ -83,6 +84,7 @@ export const CLIENT_SCRIPT = `
 export function renderHTML(
   sessions: SessionStats[],
   summary: TokenSummary,
+  costSummary: CostSummary,
   daily: DailyTokens[],
   dailyModel: DailyModelTokens[],
   toolGroups: ToolGroupSummary[],
@@ -107,7 +109,7 @@ export function renderHTML(
     </div>
   </div>
   <div id="sessions">
-    ${renderSessionsFragment(sessions, summary, daily, dailyModel, toolGroups, directories, selectedDir)}
+    ${renderSessionsFragment(sessions, summary, costSummary, daily, dailyModel, toolGroups, directories, selectedDir)}
   </div>
   <script>${CLIENT_SCRIPT}</script>
 </body>
