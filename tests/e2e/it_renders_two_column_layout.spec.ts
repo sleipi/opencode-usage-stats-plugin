@@ -13,7 +13,7 @@ test.describe("two-column layout", () => {
     const leftPanel = page.locator(".left-panel");
     await expect(leftPanel).toBeVisible();
 
-    await expect(leftPanel.locator(".stats-bar")).toBeVisible();
+    await expect(leftPanel.locator(".stats-bar").first()).toBeVisible();
     await expect(leftPanel.locator(".daily-chart")).toHaveCount(2);
   });
 
