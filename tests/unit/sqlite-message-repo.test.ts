@@ -79,4 +79,76 @@ describe("sqlite message repo", () => {
     db.close();
     repos.close();
   });
+
+  test("getTodayCost returns sum of cost for today", () => {
+    const { dir, dbPath } = createTempDbPath("opencode-usage-stats-repos-");
+    cleanupDirs.push(dir);
+    const repos = createSqliteRepos(dbPath);
+    const today = new Date().toISOString().slice(0, 10);
+
+    repos.messages.upsert({
+      sessionId: "s1",
+      messageId: "m1",
+      role: "assistant",
+      modelId: "model-a",
+      providerId: "prov-a",
+      inputTokens: 0,
+      outputTokens: 0,
+      reasoningTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      cost: 0.05,
+      agent: null,
+    });
+
+    const result = repos.messages.getTodayCost(today);
+    expect(result.date).toBe(today);
+    expect(result.total).toBeCloseTo(0.05);
+
+    repos.close();
+  });
+
+  test("getDailyModelCost groups cost by date and model", () => {
+    const { dir, dbPath } = createTempDbPath("opencode-usage-stats-repos-");
+    cleanupDirs.push(dir);
+    const repos = createSqliteRepos(dbPath);
+
+    repos.messages.upsert({
+      sessionId: "s1",
+      messageId: "m1",
+      role: "assistant",
+      modelId: "sonnet",
+      providerId: "anthropic",
+      inputTokens: 0,
+      outputTokens: 0,
+      reasoningTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      cost: 0.1,
+      agent: null,
+    });
+    repos.messages.upsert({
+      sessionId: "s1",
+      messageId: "m2",
+      role: "assistant",
+      modelId: "sonnet",
+      providerId: "anthropic",
+      inputTokens: 0,
+      outputTokens: 0,
+      reasoningTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      cost: 0.2,
+      agent: null,
+    });
+
+    const result = repos.messages.getDailyModelCost();
+    const today = new Date().toISOString().slice(0, 10);
+    const row = result.find(
+      (r) => r.date === today && r.model === "anthropic / sonnet",
+    );
+    expect(row?.total).toBeCloseTo(0.3);
+
+    repos.close();
+  });
 });

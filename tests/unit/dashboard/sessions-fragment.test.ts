@@ -88,4 +88,38 @@ describe("renderSessionsFragment", () => {
     );
     expect(html).toContain('value="/proj/b" selected');
   });
+
+  test("renders daily cost chart", () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const html = renderSessionsFragment(
+      [],
+      summary,
+      costSummary,
+      [],
+      [],
+      [],
+      [],
+      undefined,
+      [{ date: today, total: 1.5 }],
+      [],
+    );
+    expect(html).toContain("Daily Cost (last 60 days)");
+  });
+
+  test("renders daily model cost chart", () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const html = renderSessionsFragment(
+      [],
+      summary,
+      costSummary,
+      [],
+      [],
+      [],
+      [],
+      undefined,
+      [],
+      [{ date: today, model: "test-model", total: 0.1 }],
+    );
+    expect(html).toContain("Daily Cost by Model (last 60 days)");
+  });
 });

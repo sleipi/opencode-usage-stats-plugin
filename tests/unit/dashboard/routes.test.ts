@@ -14,6 +14,8 @@ function makeStubDailyTokens(): DailyTokensService {
   return {
     getDailyTokens: () => [],
     getDailyTokensByModel: () => [],
+    getDailyCost: () => [],
+    getDailyModelCost: () => [],
     getTokenSummary: () => ({
       today: 0,
       thisWeek: 0,
@@ -48,7 +50,9 @@ function makeStubRepos(): Repos {
         lastMonth: 0,
       }),
       getTodayTokens: () => ({ date: "2025-01-01", total: 0 }),
+      getTodayCost: () => ({ date: "2025-01-01", total: 0 }),
       getDailyTokensByModel: () => [],
+      getDailyModelCost: () => [],
       getCostSummary: () => ({
         today: 0,
         thisWeek: 0,
@@ -67,6 +71,7 @@ function makeStubRepos(): Repos {
     dailyUsage: {
       recompute: () => {},
       getHistoryUntil: () => [],
+      getHistoryUntilCost: () => [],
     },
     vacuum: () => {},
     close: () => {},

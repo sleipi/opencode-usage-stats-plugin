@@ -58,3 +58,5 @@ function createUsageStatsPlugin(deps: UsageStatsPluginDeps): Plugin {
 export const UsageStatsPlugin: Plugin = createUsageStatsPlugin({
   createRepos: (dbPath) => createSqliteRepos(dbPath),
 });
+
+export default { server: UsageStatsPlugin };

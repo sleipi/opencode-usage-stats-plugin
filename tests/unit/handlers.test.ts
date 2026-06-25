@@ -127,7 +127,9 @@ function createReposDouble(opts?: {
         lastMonth: 0,
       }),
       getTodayTokens: (today) => ({ date: today, total: 0 }),
+      getTodayCost: (today) => ({ date: today, total: 0 }),
       getDailyTokensByModel: () => [],
+      getDailyModelCost: () => [],
       deleteOlderThan: () => 0,
       getCostSummary: () => ({
         today: 0,
@@ -145,6 +147,7 @@ function createReposDouble(opts?: {
     dailyUsage: {
       recompute: () => {},
       getHistoryUntil: () => [],
+      getHistoryUntilCost: () => [],
     },
     vacuum: () => {},
     close: () => {},

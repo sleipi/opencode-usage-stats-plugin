@@ -54,6 +54,8 @@ export interface MessageRepo {
   getTokenSummary(): TokenSummary;
   getCostSummary(): CostSummary;
   getTodayTokens(today: string): DailyTokens;
+  getTodayCost(today: string): DailyTokens;
   getDailyTokensByModel(): DailyModelTokens[];
+  getDailyModelCost(): DailyModelTokens[];
   deleteOlderThan(cutoffDate: string): number;
 }

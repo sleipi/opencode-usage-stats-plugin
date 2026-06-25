@@ -5,7 +5,9 @@ import type { Repos } from "../../../src/db/repos";
 function makeStubRepos(
   overrides: Partial<{
     todayTokens: { date: string; total: number };
+    todayCost: { date: string; total: number };
     history: { date: string; total: number }[];
+    historyCost: { date: string; total: number }[];
     tokenSummary: {
       today: number;
       thisWeek: number;
@@ -13,6 +15,7 @@ function makeStubRepos(
       lastMonth: number;
     };
     dailyModel: { date: string; model: string; total: number }[];
+    dailyModelCost: { date: string; model: string; total: number }[];
   }> = {},
 ): Repos {
   return {
@@ -38,7 +41,13 @@ function makeStubRepos(
           date: new Date().toISOString().slice(0, 10),
           total: 0,
         },
+      getTodayCost: () =>
+        overrides.todayCost ?? {
+          date: new Date().toISOString().slice(0, 10),
+          total: 0,
+        },
       getDailyTokensByModel: () => overrides.dailyModel ?? [],
+      getDailyModelCost: () => overrides.dailyModelCost ?? [],
       upsert: () => {},
       deleteOlderThan: () => 0,
       getCostSummary: () => ({
@@ -57,6 +66,7 @@ function makeStubRepos(
     dailyUsage: {
       recompute: () => {},
       getHistoryUntil: () => overrides.history ?? [],
+      getHistoryUntilCost: () => overrides.historyCost ?? [],
     },
     vacuum: () => {},
     close: () => {},
@@ -101,5 +111,33 @@ describe("DailyTokensService", () => {
       makeStubRepos({ dailyModel: data }),
     );
     expect(service.getDailyTokensByModel()).toEqual(data);
+  });
+
+  test("getDailyCost returns 60 days with gap filling", () => {
+    const service = createDailyTokensService(makeStubRepos());
+    const result = service.getDailyCost();
+    expect(result).toHaveLength(60);
+    expect(result[59]!.date).toBe(new Date().toISOString().slice(0, 10));
+  });
+
+  test("getDailyCost merges today cost with history", () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const service = createDailyTokensService(
+      makeStubRepos({
+        todayCost: { date: today, total: 0.5 },
+        historyCost: [{ date: today, total: 0.1 }],
+      }),
+    );
+    const result = service.getDailyCost();
+    const todayEntry = result.find((d) => d.date === today);
+    expect(todayEntry!.total).toBeCloseTo(0.5);
+  });
+
+  test("getDailyModelCost delegates to repo", () => {
+    const data = [{ date: "2025-01-01", model: "test", total: 0.05 }];
+    const service = createDailyTokensService(
+      makeStubRepos({ dailyModelCost: data }),
+    );
+    expect(service.getDailyModelCost()).toEqual(data);
   });
 });
