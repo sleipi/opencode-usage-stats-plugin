@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { renderDailyChart, renderDailyCostChart } from "../../../src/dashboard/templates/daily-chart";
+import {
+  renderDailyChart,
+  renderDailyCostChart,
+} from "../../../src/dashboard/templates/daily-chart";
 
 describe("renderDailyChart", () => {
   test("renders 60 chart columns", () => {

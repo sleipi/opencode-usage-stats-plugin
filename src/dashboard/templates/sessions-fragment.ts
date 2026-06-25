@@ -6,9 +6,12 @@ import type {
 import type { DailyTokens } from "../../db/shared-types";
 import type { ToolGroupSummary } from "../../db/tool-call/tool-call-repo";
 import type { SessionStats } from "../services/types";
-import { renderDailyCostChart, renderDailyChart } from "./daily-chart";
+import { renderDailyChart, renderDailyCostChart } from "./daily-chart";
 import { esc } from "./formatters";
-import { renderDailyModelChart, renderDailyModelCostChart } from "./model-chart";
+import {
+  renderDailyModelChart,
+  renderDailyModelCostChart,
+} from "./model-chart";
 import { renderSessionCard } from "./session-card";
 import { renderStatsBar } from "./stats-bar";
 import { renderToolUsage } from "./tool-usage";

@@ -102,7 +102,9 @@ export function renderDailyModelChart(modelData: DailyModelTokens[]): string {
     </div>`;
 }
 
-export function renderDailyModelCostChart(modelData: DailyModelTokens[]): string {
+export function renderDailyModelCostChart(
+  modelData: DailyModelTokens[],
+): string {
   const modelTotals = new Map<string, number>();
   for (const d of modelData) {
     modelTotals.set(d.model, (modelTotals.get(d.model) ?? 0) + d.total);

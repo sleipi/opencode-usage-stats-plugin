@@ -78,7 +78,10 @@ export class SqliteDailyUsageRepo implements DailyUsageRepo {
       .all(dayExclusive, `-${lookbackDays} days`) as DailyTokens[];
   }
 
-  getHistoryUntilCost(dayExclusive: string, lookbackDays: number): DailyTokens[] {
+  getHistoryUntilCost(
+    dayExclusive: string,
+    lookbackDays: number,
+  ): DailyTokens[] {
     return this.db
       .prepare(`
       SELECT day AS date, cost_total AS total
