@@ -14,6 +14,7 @@ export class SqliteMessageRepo implements MessageRepo {
   private readonly tokenSummaryStmt;
   private readonly costSummaryStmt;
   private readonly todayTokensStmt;
+  private readonly todayCostStmt;
 
   constructor(private readonly db: Database) {
     this.upsertMessageStmt = this.db.prepare(`
@@ -66,6 +67,13 @@ export class SqliteMessageRepo implements MessageRepo {
     this.todayTokensStmt = this.db.prepare(`
       SELECT ? AS date,
              COALESCE(SUM(input_tokens + cache_read_tokens + output_tokens + reasoning_tokens), 0) AS total
+      FROM messages
+      WHERE timestamp >= ? AND timestamp < date(?, '+1 day')
+    `);
+
+    this.todayCostStmt = this.db.prepare(`
+      SELECT ? AS date,
+             COALESCE(SUM(cost), 0) AS total
       FROM messages
       WHERE timestamp >= ? AND timestamp < date(?, '+1 day')
     `);
@@ -139,12 +147,30 @@ export class SqliteMessageRepo implements MessageRepo {
     return this.todayTokensStmt.get(today, today, today) as DailyTokens;
   }
 
+  getTodayCost(today: string): DailyTokens {
+    return this.todayCostStmt.get(today, today, today) as DailyTokens;
+  }
+
   getDailyTokensByModel(): DailyModelTokens[] {
     return this.db
       .prepare(`
       SELECT date(timestamp) AS date,
              COALESCE(provider_id, 'unknown') || ' / ' || COALESCE(model_id, 'unknown') AS model,
              COALESCE(SUM(input_tokens + cache_read_tokens + output_tokens + reasoning_tokens), 0) AS total
+      FROM messages
+      WHERE timestamp >= date('now', '-60 days')
+      GROUP BY date, model
+      ORDER BY date ASC
+    `)
+      .all() as DailyModelTokens[];
+  }
+
+  getDailyModelCost(): DailyModelTokens[] {
+    return this.db
+      .prepare(`
+      SELECT date(timestamp) AS date,
+             COALESCE(provider_id, 'unknown') || ' / ' || COALESCE(model_id, 'unknown') AS model,
+             COALESCE(SUM(cost), 0) AS total
       FROM messages
       WHERE timestamp >= date('now', '-60 days')
       GROUP BY date, model
