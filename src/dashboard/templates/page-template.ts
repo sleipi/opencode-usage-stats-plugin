@@ -90,6 +90,8 @@ export function renderHTML(
   toolGroups: ToolGroupSummary[],
   directories: string[] = [],
   selectedDir?: string,
+  dailyCost: DailyTokens[] = [],
+  dailyModelCost: DailyModelTokens[] = [],
 ): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -109,7 +111,7 @@ export function renderHTML(
     </div>
   </div>
   <div id="sessions">
-    ${renderSessionsFragment(sessions, summary, costSummary, daily, dailyModel, toolGroups, directories, selectedDir)}
+    ${renderSessionsFragment(sessions, summary, costSummary, daily, dailyModel, toolGroups, directories, selectedDir, dailyCost, dailyModelCost)}
   </div>
   <script>${CLIENT_SCRIPT}</script>
 </body>

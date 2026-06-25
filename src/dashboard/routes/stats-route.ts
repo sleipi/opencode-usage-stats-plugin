@@ -46,6 +46,8 @@ export function createStatsRoute(
         const costSummary = dailyTokens.getCostSummary();
         const daily = dailyTokens.getDailyTokens();
         const dailyModel = dailyTokens.getDailyTokensByModel();
+        const dailyCost = dailyTokens.getDailyCost();
+        const dailyModelCost = dailyTokens.getDailyModelCost();
         const toolGroups = repos.toolCalls.getToolUsageSummary();
         const html = renderSessionsFragment(
           sessions,
@@ -56,6 +58,8 @@ export function createStatsRoute(
           toolGroups,
           directories,
           dirFilter,
+          dailyCost,
+          dailyModelCost,
         );
 
         cache.set(cacheKey, { html, expiry: now + CACHE_TTL_MS });

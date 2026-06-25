@@ -23,6 +23,8 @@ export function createPageRoute(
         const costSummary = dailyTokens.getCostSummary();
         const daily = dailyTokens.getDailyTokens();
         const dailyModel = dailyTokens.getDailyTokensByModel();
+        const dailyCost = dailyTokens.getDailyCost();
+        const dailyModelCost = dailyTokens.getDailyModelCost();
         const toolGroups = repos.toolCalls.getToolUsageSummary();
         return new Response(
           renderHTML(
@@ -34,6 +36,8 @@ export function createPageRoute(
             toolGroups,
             directories,
             dirFilter,
+            dailyCost,
+            dailyModelCost,
           ),
           {
             headers: { "Content-Type": "text/html; charset=utf-8" },

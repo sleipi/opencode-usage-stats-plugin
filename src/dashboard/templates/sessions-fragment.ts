@@ -6,9 +6,9 @@ import type {
 import type { DailyTokens } from "../../db/shared-types";
 import type { ToolGroupSummary } from "../../db/tool-call/tool-call-repo";
 import type { SessionStats } from "../services/types";
-import { renderDailyChart } from "./daily-chart";
+import { renderDailyCostChart, renderDailyChart } from "./daily-chart";
 import { esc } from "./formatters";
-import { renderDailyModelChart } from "./model-chart";
+import { renderDailyModelChart, renderDailyModelCostChart } from "./model-chart";
 import { renderSessionCard } from "./session-card";
 import { renderStatsBar } from "./stats-bar";
 import { renderToolUsage } from "./tool-usage";
@@ -22,10 +22,14 @@ export function renderSessionsFragment(
   toolGroups: ToolGroupSummary[],
   directories: string[] = [],
   selectedDir?: string,
+  dailyCost: DailyTokens[] = [],
+  dailyModelCost: DailyModelTokens[] = [],
 ): string {
   const bar = renderStatsBar(summary, costSummary);
   const chart = renderDailyChart(daily);
+  const costChart = renderDailyCostChart(dailyCost);
   const modelChart = renderDailyModelChart(dailyModel);
+  const modelCostChart = renderDailyModelCostChart(dailyModelCost);
   const toolUsage = renderToolUsage(toolGroups);
 
   const leftPanel = `
@@ -33,7 +37,9 @@ export function renderSessionsFragment(
       ${bar}
       <hr class="section-divider">
       ${chart}
+      ${costChart}
       ${modelChart}
+      ${modelCostChart}
       ${toolUsage}
     </div>`;
 
