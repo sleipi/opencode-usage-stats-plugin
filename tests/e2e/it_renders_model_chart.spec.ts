@@ -4,8 +4,8 @@ test.describe("model chart", () => {
   test("renders model chart with title", async ({ page }) => {
     await page.goto("/");
 
-    // The model chart is the second .daily-chart
-    const modelChart = page.locator(".daily-chart").nth(1);
+    // The model chart is the third .daily-chart (token, cost, token-by-model, cost-by-model)
+    const modelChart = page.locator(".daily-chart").nth(2);
     await expect(modelChart).toBeVisible();
     await expect(
       modelChart.locator(".chart-title", {
@@ -17,7 +17,7 @@ test.describe("model chart", () => {
   test("renders 60 bar columns", async ({ page }) => {
     await page.goto("/");
 
-    const modelChart = page.locator(".daily-chart").nth(1);
+    const modelChart = page.locator(".daily-chart").nth(2);
     const cols = modelChart.locator(".chart-container .chart-col");
     await expect(cols).toHaveCount(60);
   });
@@ -25,7 +25,7 @@ test.describe("model chart", () => {
   test("renders stacked bar segments for days with data", async ({ page }) => {
     await page.goto("/");
 
-    const modelChart = page.locator(".daily-chart").nth(1);
+    const modelChart = page.locator(".daily-chart").nth(2);
     const segments = modelChart.locator(".model-bar-seg");
     const count = await segments.count();
     expect(count).toBeGreaterThan(0);
@@ -34,7 +34,7 @@ test.describe("model chart", () => {
   test("renders legend with seeded model names", async ({ page }) => {
     await page.goto("/");
 
-    const modelChart = page.locator(".daily-chart").nth(1);
+    const modelChart = page.locator(".daily-chart").nth(2);
     const legend = modelChart.locator(".chart-legend");
 
     // We seeded gpt-5.3-codex and claude-sonnet-4

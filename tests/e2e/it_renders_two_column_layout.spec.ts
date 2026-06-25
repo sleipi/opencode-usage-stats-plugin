@@ -14,7 +14,7 @@ test.describe("two-column layout", () => {
     await expect(leftPanel).toBeVisible();
 
     await expect(leftPanel.locator(".stats-bar").first()).toBeVisible();
-    await expect(leftPanel.locator(".daily-chart")).toHaveCount(2);
+    await expect(leftPanel.locator(".daily-chart")).toHaveCount(4);
   });
 
   test("right panel contains directory filter and session cards", async ({
