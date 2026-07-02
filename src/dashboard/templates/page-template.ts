@@ -110,6 +110,8 @@ export const CLIENT_SCRIPT = `
         btn.onclick = () => btn.classList.toggle('active');
       });
 
+      document.getElementById('budget-error').style.display = 'none';
+      document.getElementById('budget-error').textContent = '';
       modal.showModal();
     }
 
@@ -129,15 +131,24 @@ export const CLIENT_SCRIPT = `
         workDays |= (1 << bit);
       });
 
+      const errorEl = document.getElementById('budget-error');
       try {
-        await fetch('/api/budget', {
+        const res = await fetch('/api/budget', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ amount, workDays, periodStartDay }),
         });
+        if (!res.ok) {
+          errorEl.textContent = 'Save failed. Please try again.';
+          errorEl.style.display = 'inline';
+          return;
+        }
         modal.close();
         refresh();
-      } catch {}
+      } catch {
+        errorEl.textContent = 'Save failed. Please try again.';
+        errorEl.style.display = 'inline';
+      }
     }`;
 
 export function renderHTML(
@@ -189,6 +200,7 @@ export function renderHTML(
       </div>
     </div>
     <div class="modal-actions">
+      <span id="budget-error" style="color:#f0883e;font-size:12px;display:none"></span>
       <button class="btn-cancel" onclick="document.getElementById('budget-modal').close()">Cancel</button>
       <button class="btn-save" onclick="saveBudget()">Save</button>
     </div>

@@ -33,11 +33,26 @@ export function createBudgetRoute(
             ) {
               return new Response("Invalid body", { status: 400 });
             }
+            const amount = (body as Record<string, unknown>).amount as number;
+            const workDays = (body as Record<string, unknown>)
+              .workDays as number;
+            const periodStartDay = (body as Record<string, unknown>)
+              .periodStartDay as number;
+
+            if (!(amount >= 0 && Number.isFinite(amount))) {
+              return new Response("Invalid values", { status: 400 });
+            }
+            if (!(workDays >= 0 && workDays <= 127)) {
+              return new Response("Invalid values", { status: 400 });
+            }
+            if (!(periodStartDay >= 1 && periodStartDay <= 28)) {
+              return new Response("Invalid values", { status: 400 });
+            }
+
             const settings: BudgetSettings = {
-              amount: (body as Record<string, unknown>).amount as number,
-              workDays: (body as Record<string, unknown>).workDays as number,
-              periodStartDay: (body as Record<string, unknown>)
-                .periodStartDay as number,
+              amount,
+              workDays,
+              periodStartDay,
             };
             const writeRepos = createWriteRepos();
             try {

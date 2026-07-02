@@ -87,4 +87,76 @@ describe("BudgetRoute", () => {
     expect(res.status).toBe(400);
     repos.close();
   });
+
+  test("POST returns 400 when amount is negative", async () => {
+    const { dir, dbPath } = createTempDbPath("budget-route-test-");
+    cleanupDirs.push(dir);
+    const repos = createSqliteRepos(dbPath);
+    const route = createBudgetRoute(repos, () => createSqliteRepos(dbPath));
+    const res = await route.handle(
+      new Request("http://localhost/api/budget", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount: -1, workDays: 62, periodStartDay: 1 }),
+      }),
+      new URL("http://localhost/api/budget"),
+    );
+    expect(res.status).toBe(400);
+    repos.close();
+  });
+
+  test("POST returns 400 when amount is Infinity", async () => {
+    const { dir, dbPath } = createTempDbPath("budget-route-test-");
+    cleanupDirs.push(dir);
+    const repos = createSqliteRepos(dbPath);
+    const route = createBudgetRoute(repos, () => createSqliteRepos(dbPath));
+    const res = await route.handle(
+      new Request("http://localhost/api/budget", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount: 1e308 * 10,
+          workDays: 62,
+          periodStartDay: 1,
+        }),
+      }),
+      new URL("http://localhost/api/budget"),
+    );
+    expect(res.status).toBe(400);
+    repos.close();
+  });
+
+  test("POST returns 400 when workDays exceeds 7-bit mask", async () => {
+    const { dir, dbPath } = createTempDbPath("budget-route-test-");
+    cleanupDirs.push(dir);
+    const repos = createSqliteRepos(dbPath);
+    const route = createBudgetRoute(repos, () => createSqliteRepos(dbPath));
+    const res = await route.handle(
+      new Request("http://localhost/api/budget", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount: 100, workDays: 128, periodStartDay: 1 }),
+      }),
+      new URL("http://localhost/api/budget"),
+    );
+    expect(res.status).toBe(400);
+    repos.close();
+  });
+
+  test("POST returns 400 when periodStartDay is 0", async () => {
+    const { dir, dbPath } = createTempDbPath("budget-route-test-");
+    cleanupDirs.push(dir);
+    const repos = createSqliteRepos(dbPath);
+    const route = createBudgetRoute(repos, () => createSqliteRepos(dbPath));
+    const res = await route.handle(
+      new Request("http://localhost/api/budget", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount: 100, workDays: 62, periodStartDay: 0 }),
+      }),
+      new URL("http://localhost/api/budget"),
+    );
+    expect(res.status).toBe(400);
+    repos.close();
+  });
 });
