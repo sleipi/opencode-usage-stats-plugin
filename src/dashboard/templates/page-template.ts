@@ -80,7 +80,65 @@ export const CLIENT_SCRIPT = `
       }
     }
     setInterval(refresh, 5000);
-    attachDirFilter();`;
+    attachDirFilter();
+
+    async function openBudgetModal() {
+      const modal = document.getElementById('budget-modal');
+      const toggles = modal.querySelectorAll('.day-toggle');
+
+      // Set defaults
+      let workDays = 62; // Mon-Fri
+      let periodStartDay = 1;
+      let amount = '';
+
+      try {
+        const res = await fetch('/api/budget');
+        if (res.ok) {
+          const data = await res.json();
+          workDays = data.workDays;
+          periodStartDay = data.periodStartDay;
+          amount = data.amount;
+        }
+      } catch {}
+
+      document.getElementById('budget-amount').value = amount;
+      document.getElementById('budget-start-day').value = periodStartDay;
+
+      toggles.forEach(btn => {
+        const bit = parseInt(btn.getAttribute('data-bit'), 10);
+        btn.classList.toggle('active', !!((workDays >> bit) & 1));
+        btn.onclick = () => btn.classList.toggle('active');
+      });
+
+      modal.showModal();
+    }
+
+    async function saveBudget() {
+      const modal = document.getElementById('budget-modal');
+      const amount = parseFloat(document.getElementById('budget-amount').value);
+      const periodStartDay = parseInt(document.getElementById('budget-start-day').value, 10);
+
+      if (isNaN(amount) || amount < 0) {
+        document.getElementById('budget-amount').focus();
+        return;
+      }
+
+      let workDays = 0;
+      modal.querySelectorAll('.day-toggle.active').forEach(btn => {
+        const bit = parseInt(btn.getAttribute('data-bit'), 10);
+        workDays |= (1 << bit);
+      });
+
+      try {
+        await fetch('/api/budget', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ amount, workDays, periodStartDay }),
+        });
+        modal.close();
+        refresh();
+      } catch {}
+    }`;
 
 export function renderHTML(
   sessions: SessionStats[],
@@ -104,12 +162,44 @@ export function renderHTML(
   <style>${DASHBOARD_CSS}</style>
 </head>
 <body>
+  <dialog id="budget-modal">
+    <div class="modal-title">Budget Settings</div>
+    <div class="modal-field">
+      <label class="modal-label" for="budget-amount">Monthly Budget ($)</label>
+      <input class="modal-input" type="number" id="budget-amount" min="0" step="0.01" placeholder="100.00">
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">Work Days</label>
+      <div class="day-toggles">
+        <button class="day-toggle" data-bit="1">Mo</button>
+        <button class="day-toggle" data-bit="2">Di</button>
+        <button class="day-toggle" data-bit="3">Mi</button>
+        <button class="day-toggle" data-bit="4">Do</button>
+        <button class="day-toggle" data-bit="5">Fr</button>
+        <button class="day-toggle" data-bit="6">Sa</button>
+        <button class="day-toggle" data-bit="0">So</button>
+      </div>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">Period</label>
+      <div style="display:flex;align-items:center;gap:8px;font-size:13px;">
+        <span style="color:#8b949e">Starts day</span>
+        <input class="modal-input" type="number" id="budget-start-day" min="1" max="28" value="1" style="width:60px">
+        <span style="color:#8b949e">of the month &mdash; ends last day of month</span>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="document.getElementById('budget-modal').close()">Cancel</button>
+      <button class="btn-save" onclick="saveBudget()">Save</button>
+    </div>
+  </dialog>
   <div class="header">
     <h1>OpenCode Usage Stats</h1>
     <div class="refresh-badge">
       <div class="refresh-dot"></div>
       <span>auto-refresh 5s</span>
       <span id="refresh-timing" class="refresh-timing"></span>
+      <button class="gear-btn" onclick="openBudgetModal()" title="Budget settings">⚙</button>
     </div>
   </div>
   <div id="sessions">
