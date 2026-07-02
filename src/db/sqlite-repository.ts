@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { SqliteBudgetRepo } from "./budget/sqlite-budget-repo";
 import { SqliteDailyUsageRepo } from "./daily-usage/sqlite-daily-usage-repo";
 import { SqliteMessageRepo } from "./message/sqlite-message-repo";
 import { getSchemaVersion, migrate } from "./migrations";
@@ -47,6 +48,7 @@ export function createSqliteRepos(
     messages: new SqliteMessageRepo(db),
     toolCalls: new SqliteToolCallRepo(db),
     dailyUsage: new SqliteDailyUsageRepo(db),
+    budget: new SqliteBudgetRepo(db),
     vacuum(): void {
       db.run("VACUUM");
     },

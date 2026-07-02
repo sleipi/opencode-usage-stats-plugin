@@ -73,6 +73,10 @@ function makeStubRepos(): Repos {
       getHistoryUntil: () => [],
       getHistoryUntilCost: () => [],
     },
+    budget: {
+      get: () => null,
+      upsert: () => {},
+    },
     vacuum: () => {},
     close: () => {},
   };

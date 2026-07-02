@@ -68,6 +68,10 @@ function makeStubRepos(
       getHistoryUntil: () => overrides.history ?? [],
       getHistoryUntilCost: () => overrides.historyCost ?? [],
     },
+    budget: {
+      get: () => null,
+      upsert: () => {},
+    },
     vacuum: () => {},
     close: () => {},
   };

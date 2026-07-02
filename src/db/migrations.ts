@@ -97,6 +97,17 @@ export const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_sessions_last_seen ON sessions(last_seen)`,
     );
   },
+  (db) => {
+    db.run(`
+      CREATE TABLE IF NOT EXISTS budget_settings (
+        id               INTEGER PRIMARY KEY DEFAULT 1,
+        amount           REAL    NOT NULL,
+        work_days        INTEGER NOT NULL,
+        period_start_day INTEGER NOT NULL DEFAULT 1,
+        updated_at       TEXT    NOT NULL
+      )
+    `);
+  },
 ];
 
 export function getSchemaVersion(): number {

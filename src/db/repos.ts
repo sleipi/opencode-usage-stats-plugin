@@ -1,3 +1,4 @@
+import type { BudgetRepo } from "./budget/budget-repo";
 import type { DailyUsageRepo } from "./daily-usage/daily-usage-repo";
 import type { MessageRepo } from "./message/message-repo";
 import type { SessionRepo } from "./session/session-repo";
@@ -8,6 +9,7 @@ export interface Repos {
   messages: MessageRepo;
   toolCalls: ToolCallRepo;
   dailyUsage: DailyUsageRepo;
+  budget: BudgetRepo;
   vacuum(): void;
   close(): void;
 }
