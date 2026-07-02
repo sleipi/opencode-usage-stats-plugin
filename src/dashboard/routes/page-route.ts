@@ -1,4 +1,5 @@
 import type { Repos } from "../../db/repos";
+import { calcBudgetStatus } from "../services/budget-service";
 import type { DailyTokensService } from "../services/daily-tokens-service";
 import type { SessionStatsService } from "../services/session-stats-service";
 import { renderHTML } from "../templates/page-template";
@@ -26,6 +27,10 @@ export function createPageRoute(
         const dailyCost = dailyTokens.getDailyCost();
         const dailyModelCost = dailyTokens.getDailyModelCost();
         const toolGroups = repos.toolCalls.getToolUsageSummary();
+        const budgetSettings = repos.budget.get();
+        const budgetStatus = budgetSettings
+          ? calcBudgetStatus(budgetSettings, costSummary.thisMonth, new Date())
+          : null;
         return new Response(
           renderHTML(
             sessions,
@@ -38,6 +43,7 @@ export function createPageRoute(
             dirFilter,
             dailyCost,
             dailyModelCost,
+            budgetStatus,
           ),
           {
             headers: { "Content-Type": "text/html; charset=utf-8" },

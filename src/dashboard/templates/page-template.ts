@@ -5,6 +5,7 @@ import type {
 } from "../../db/message/message-repo";
 import type { DailyTokens } from "../../db/shared-types";
 import type { ToolGroupSummary } from "../../db/tool-call/tool-call-repo";
+import type { BudgetStatus } from "../services/budget-service";
 import type { SessionStats } from "../services/types";
 import { renderSessionsFragment } from "./sessions-fragment";
 import { DASHBOARD_CSS } from "./styles";
@@ -92,6 +93,7 @@ export function renderHTML(
   selectedDir?: string,
   dailyCost: DailyTokens[] = [],
   dailyModelCost: DailyModelTokens[] = [],
+  budgetStatus: BudgetStatus | null = null,
 ): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -111,7 +113,7 @@ export function renderHTML(
     </div>
   </div>
   <div id="sessions">
-    ${renderSessionsFragment(sessions, summary, costSummary, daily, dailyModel, toolGroups, directories, selectedDir, dailyCost, dailyModelCost)}
+    ${renderSessionsFragment(sessions, summary, costSummary, daily, dailyModel, toolGroups, directories, selectedDir, dailyCost, dailyModelCost, budgetStatus)}
   </div>
   <script>${CLIENT_SCRIPT}</script>
 </body>
