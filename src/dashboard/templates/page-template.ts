@@ -82,6 +82,17 @@ export const CLIENT_SCRIPT = `
     setInterval(refresh, 5000);
     attachDirFilter();
 
+    function ordinal(n) {
+      const s = ['th','st','nd','rd'];
+      const v = n % 100;
+      return n + (s[(v - 20) % 10] || s[v] || s[0]);
+    }
+    function updatePeriodHint() {
+      const day = parseInt(document.getElementById('budget-start-day').value, 10) || 1;
+      document.getElementById('period-hint').textContent =
+        day <= 1 ? 'ends last day of month' : 'ends ' + ordinal(day - 1) + ' of next month';
+    }
+
     async function openBudgetModal() {
       const modal = document.getElementById('budget-modal');
       const toggles = modal.querySelectorAll('.day-toggle');
@@ -103,6 +114,7 @@ export const CLIENT_SCRIPT = `
 
       document.getElementById('budget-amount').value = amount;
       document.getElementById('budget-start-day').value = periodStartDay;
+      updatePeriodHint();
 
       toggles.forEach(btn => {
         const bit = parseInt(btn.getAttribute('data-bit'), 10);
@@ -193,11 +205,12 @@ export function renderHTML(
     </div>
     <div class="modal-field">
       <label class="modal-label">Period</label>
-      <div style="display:flex;align-items:center;gap:8px;font-size:13px;">
-        <span style="color:#8b949e">Starts day</span>
-        <input class="modal-input" type="number" id="budget-start-day" min="1" max="28" value="1" style="width:60px">
-        <span style="color:#8b949e">of the month &mdash; ends last day of month</span>
+      <div class="period-row">
+        <span class="modal-muted">Starts day</span>
+        <input class="modal-input period-input" type="number" id="budget-start-day" min="1" max="28" value="1" oninput="updatePeriodHint()">
+        <span class="modal-muted">of month</span>
       </div>
+      <div class="modal-hint" id="period-hint">ends last day of month</div>
     </div>
     <div class="modal-actions">
       <span id="budget-error" style="color:#f0883e;font-size:12px;display:none"></span>
@@ -211,7 +224,7 @@ export function renderHTML(
       <div class="refresh-dot"></div>
       <span>auto-refresh 5s</span>
       <span id="refresh-timing" class="refresh-timing"></span>
-      <button class="gear-btn" onclick="openBudgetModal()" title="Budget settings">⚙</button>
+      <button class="gear-btn" onclick="openBudgetModal()" title="Budget settings"><svg width="13" height="13" viewBox="0 0 16 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="1" width="14" height="12" rx="2"/><path d="M1 5h14"/><rect x="3" y="7.5" width="4" height="2.5" rx="1" fill="currentColor" stroke="none"/></svg>Budget</button>
     </div>
   </div>
   <div id="sessions">

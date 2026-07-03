@@ -351,8 +351,9 @@ export const DASHBOARD_CSS = `
       padding: 24px;
       color: #c9d1d9;
       font-family: "SF Mono", "Fira Code", "JetBrains Mono", monospace;
-      min-width: 360px;
+      min-width: 380px;
       max-width: 480px;
+      margin: auto;
     }
     dialog#budget-modal::backdrop {
       background: rgba(0, 0, 0, 0.6);
@@ -385,6 +386,9 @@ export const DASHBOARD_CSS = `
       border-color: #1f6feb; background: #1a2d4d; color: #f0f6fc;
     }
     .modal-hint { font-size: 11px; color: #484f58; margin-top: 6px; }
+    .modal-muted { color: #8b949e; font-size: 13px; white-space: nowrap; }
+    .period-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .period-input { width: 60px !important; }
     .modal-actions {
       display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px;
     }
@@ -402,8 +406,9 @@ export const DASHBOARD_CSS = `
     .btn-save:hover { background: #2ea043; }
     .gear-btn {
       background: transparent; border: 1px solid #30363d;
-      border-radius: 6px; padding: 3px 8px;
-      color: #8b949e; font-size: 13px; cursor: pointer;
+      border-radius: 6px; padding: 3px 10px;
+      color: #8b949e; font-size: 12px; cursor: pointer;
       line-height: 1; transition: all 0.15s;
+      display: flex; align-items: center; gap: 5px;
     }
     .gear-btn:hover { border-color: #484f58; color: #c9d1d9; }`;

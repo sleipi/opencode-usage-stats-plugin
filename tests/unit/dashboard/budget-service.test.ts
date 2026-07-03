@@ -62,7 +62,7 @@ describe("calcBudgetStatus", () => {
     expect(status.remainingPct).toBe(100);
   });
 
-  test("resetDate is first day of next month", () => {
+  test("resetDate is periodStartDay of next month (start=1)", () => {
     const status = calcBudgetStatus(
       { amount: 100, workDays: MON_FRI, periodStartDay: 1 },
       50,
@@ -71,6 +71,17 @@ describe("calcBudgetStatus", () => {
     expect(status.resetDate.getFullYear()).toBe(2026);
     expect(status.resetDate.getMonth()).toBe(7); // August = index 7
     expect(status.resetDate.getDate()).toBe(1);
+  });
+
+  test("resetDate is periodStartDay of next month (start=5)", () => {
+    const status = calcBudgetStatus(
+      { amount: 100, workDays: MON_FRI, periodStartDay: 5 },
+      50,
+      new Date(2026, 6, 15),
+    );
+    expect(status.resetDate.getFullYear()).toBe(2026);
+    expect(status.resetDate.getMonth()).toBe(7);
+    expect(status.resetDate.getDate()).toBe(5);
   });
 
   test("weekend-only work days", () => {

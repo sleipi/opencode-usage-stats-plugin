@@ -44,7 +44,7 @@ export function calcBudgetStatus(
     settings.amount > 0
       ? Math.max(0, Math.min(100, (remaining / settings.amount) * 100))
       : 0;
-  const resetDate = new Date(year, month + 1, 1);
+  const resetDate = new Date(year, month + 1, settings.periodStartDay);
 
   return {
     amount: settings.amount,
