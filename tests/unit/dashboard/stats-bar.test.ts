@@ -1,5 +1,68 @@
 import { describe, expect, test } from "bun:test";
-import { renderStatsBar } from "../../../src/dashboard/templates/stats-bar";
+import type { BudgetStatus } from "../../../src/dashboard/services/budget-service";
+import {
+  renderBudgetBar,
+  renderStatsBar,
+} from "../../../src/dashboard/templates/stats-bar";
+
+function makeStatus(overrides: Partial<BudgetStatus> = {}): BudgetStatus {
+  return {
+    amount: 100,
+    spent: 50,
+    expected: 60,
+    delta: -10, // 10 ahead
+    remaining: 50,
+    remainingPct: 50,
+    resetDate: new Date(2026, 7, 1), // Aug 1
+    workDaysTotal: 23,
+    workDaysElapsed: 14,
+    ...overrides,
+  };
+}
+
+describe("renderBudgetBar", () => {
+  test("returns empty string when status is null", () => {
+    expect(renderBudgetBar(null)).toBe("");
+  });
+
+  test("shows ahead badge when delta negative", () => {
+    const html = renderBudgetBar(makeStatus({ delta: -10, expected: 60 }));
+    expect(html).toContain("budget-badge--ahead");
+    expect(html).toContain("▲");
+    expect(html).toContain("ahead");
+  });
+
+  test("shows over badge when delta positive beyond threshold", () => {
+    const html = renderBudgetBar(makeStatus({ delta: 20, expected: 60 }));
+    expect(html).toContain("budget-badge--over");
+    expect(html).toContain("▼");
+    expect(html).toContain("over");
+  });
+
+  test("shows on-track badge when delta within 2% of expected", () => {
+    const html = renderBudgetBar(makeStatus({ delta: 0.5, expected: 60 }));
+    expect(html).toContain("budget-badge--on-track");
+    expect(html).toContain("on track");
+  });
+
+  test("shows remaining and reset date", () => {
+    const html = renderBudgetBar(
+      makeStatus({
+        remaining: 50,
+        remainingPct: 50,
+        resetDate: new Date(2026, 7, 1),
+      }),
+    );
+    expect(html).toContain("50%");
+    expect(html).toContain("Aug");
+    expect(html).toContain("1");
+  });
+
+  test("shows Budget$ label", () => {
+    const html = renderBudgetBar(makeStatus());
+    expect(html).toContain("Budget$");
+  });
+});
 
 const zeroCost = { today: 0, thisWeek: 0, thisMonth: 0, lastMonth: 0 };
 

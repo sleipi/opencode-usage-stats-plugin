@@ -5,6 +5,7 @@ import type {
 } from "../../db/message/message-repo";
 import type { DailyTokens } from "../../db/shared-types";
 import type { ToolGroupSummary } from "../../db/tool-call/tool-call-repo";
+import type { BudgetStatus } from "../services/budget-service";
 import type { SessionStats } from "../services/types";
 import { renderSessionsFragment } from "./sessions-fragment";
 import { DASHBOARD_CSS } from "./styles";
@@ -79,7 +80,88 @@ export const CLIENT_SCRIPT = `
       }
     }
     setInterval(refresh, 5000);
-    attachDirFilter();`;
+    attachDirFilter();
+
+    function ordinal(n) {
+      const s = ['th','st','nd','rd'];
+      const v = n % 100;
+      return n + (s[(v - 20) % 10] || s[v] || s[0]);
+    }
+    function updatePeriodHint() {
+      const day = parseInt(document.getElementById('budget-start-day').value, 10) || 1;
+      document.getElementById('period-hint').textContent =
+        day <= 1 ? 'ends last day of month' : 'ends ' + ordinal(day - 1) + ' of next month';
+    }
+
+    async function openBudgetModal() {
+      const modal = document.getElementById('budget-modal');
+      const toggles = modal.querySelectorAll('.day-toggle');
+
+      // Set defaults
+      let workDays = 62; // Mon-Fri
+      let periodStartDay = 1;
+      let amount = '';
+
+      try {
+        const res = await fetch('/api/budget');
+        if (res.ok) {
+          const data = await res.json();
+          workDays = data.workDays;
+          periodStartDay = data.periodStartDay;
+          amount = data.amount;
+        }
+      } catch {}
+
+      document.getElementById('budget-amount').value = amount;
+      document.getElementById('budget-start-day').value = periodStartDay;
+      updatePeriodHint();
+
+      toggles.forEach(btn => {
+        const bit = parseInt(btn.getAttribute('data-bit'), 10);
+        btn.classList.toggle('active', !!((workDays >> bit) & 1));
+        btn.onclick = () => btn.classList.toggle('active');
+      });
+
+      document.getElementById('budget-error').style.display = 'none';
+      document.getElementById('budget-error').textContent = '';
+      modal.showModal();
+    }
+
+    async function saveBudget() {
+      const modal = document.getElementById('budget-modal');
+      const amount = parseFloat(document.getElementById('budget-amount').value);
+      const periodStartDay = parseInt(document.getElementById('budget-start-day').value, 10);
+
+      if (isNaN(amount) || amount < 0) {
+        document.getElementById('budget-amount').focus();
+        return;
+      }
+
+      let workDays = 0;
+      modal.querySelectorAll('.day-toggle.active').forEach(btn => {
+        const bit = parseInt(btn.getAttribute('data-bit'), 10);
+        workDays |= (1 << bit);
+      });
+
+      const errorEl = document.getElementById('budget-error');
+      try {
+        const res = await fetch('/api/budget', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ amount, workDays, periodStartDay }),
+        });
+        if (!res.ok) {
+          errorEl.textContent = 'Save failed. Please try again.';
+          errorEl.style.display = 'inline';
+          return;
+        }
+        modal.close();
+        refresh();
+      } catch {
+        errorEl.textContent = 'Save failed. Please try again.';
+        errorEl.style.display = 'inline';
+      }
+    }`;
 
 export function renderHTML(
   sessions: SessionStats[],
@@ -92,6 +174,7 @@ export function renderHTML(
   selectedDir?: string,
   dailyCost: DailyTokens[] = [],
   dailyModelCost: DailyModelTokens[] = [],
+  budgetStatus: BudgetStatus | null = null,
 ): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -102,16 +185,50 @@ export function renderHTML(
   <style>${DASHBOARD_CSS}</style>
 </head>
 <body>
+  <dialog id="budget-modal">
+    <div class="modal-title">Budget Settings</div>
+    <div class="modal-field">
+      <label class="modal-label" for="budget-amount">Monthly Budget ($)</label>
+      <input class="modal-input" type="number" id="budget-amount" min="0" step="0.01" placeholder="100.00">
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">Work Days</label>
+      <div class="day-toggles">
+        <button class="day-toggle" data-bit="1">Mo</button>
+        <button class="day-toggle" data-bit="2">Di</button>
+        <button class="day-toggle" data-bit="3">Mi</button>
+        <button class="day-toggle" data-bit="4">Do</button>
+        <button class="day-toggle" data-bit="5">Fr</button>
+        <button class="day-toggle" data-bit="6">Sa</button>
+        <button class="day-toggle" data-bit="0">So</button>
+      </div>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">Period</label>
+      <div class="period-row">
+        <span class="modal-muted">Starts day</span>
+        <input class="modal-input period-input" type="number" id="budget-start-day" min="1" max="28" value="1" oninput="updatePeriodHint()">
+        <span class="modal-muted">of month</span>
+      </div>
+      <div class="modal-hint" id="period-hint">ends last day of month</div>
+    </div>
+    <div class="modal-actions">
+      <span id="budget-error" style="color:#f0883e;font-size:12px;display:none"></span>
+      <button class="btn-cancel" onclick="document.getElementById('budget-modal').close()">Cancel</button>
+      <button class="btn-save" onclick="saveBudget()">Save</button>
+    </div>
+  </dialog>
   <div class="header">
     <h1>OpenCode Usage Stats</h1>
     <div class="refresh-badge">
       <div class="refresh-dot"></div>
       <span>auto-refresh 5s</span>
       <span id="refresh-timing" class="refresh-timing"></span>
+      <button class="gear-btn" onclick="openBudgetModal()" title="Budget settings"><svg width="13" height="13" viewBox="0 0 16 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="1" width="14" height="12" rx="2"/><path d="M1 5h14"/><rect x="3" y="7.5" width="4" height="2.5" rx="1" fill="currentColor" stroke="none"/></svg>Budget</button>
     </div>
   </div>
   <div id="sessions">
-    ${renderSessionsFragment(sessions, summary, costSummary, daily, dailyModel, toolGroups, directories, selectedDir, dailyCost, dailyModelCost)}
+    ${renderSessionsFragment(sessions, summary, costSummary, daily, dailyModel, toolGroups, directories, selectedDir, dailyCost, dailyModelCost, budgetStatus)}
   </div>
   <script>${CLIENT_SCRIPT}</script>
 </body>

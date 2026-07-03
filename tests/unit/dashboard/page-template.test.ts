@@ -34,4 +34,22 @@ describe("renderHTML", () => {
     expect(html).toContain("auto-refresh 5s");
     expect(html).toContain("refresh-dot");
   });
+
+  test("includes gear button in header", () => {
+    const html = renderHTML([], summary, costSummary, [], [], []);
+    expect(html).toContain("gear-btn");
+    expect(html).toContain("budget-modal");
+  });
+
+  test("includes day toggle buttons with German labels", () => {
+    const html = renderHTML([], summary, costSummary, [], [], []);
+    expect(html).toContain("day-toggle");
+    expect(html).toContain(">Mo<");
+    expect(html).toContain(">Di<");
+    expect(html).toContain(">Mi<");
+    expect(html).toContain(">Do<");
+    expect(html).toContain(">Fr<");
+    expect(html).toContain(">Sa<");
+    expect(html).toContain(">So<");
+  });
 });

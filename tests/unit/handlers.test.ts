@@ -149,6 +149,10 @@ function createReposDouble(opts?: {
       getHistoryUntil: () => [],
       getHistoryUntilCost: () => [],
     },
+    budget: {
+      get: () => null,
+      upsert: () => {},
+    },
     vacuum: () => {},
     close: () => {},
   };

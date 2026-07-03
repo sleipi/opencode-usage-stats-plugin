@@ -73,6 +73,10 @@ function makeStubRepos(): Repos {
       getHistoryUntil: () => [],
       getHistoryUntilCost: () => [],
     },
+    budget: {
+      get: () => null,
+      upsert: () => {},
+    },
     vacuum: () => {},
     close: () => {},
   };
@@ -89,17 +93,17 @@ describe("StatsRoute", () => {
     expect(route.match(new URL("http://localhost/"))).toBe(false);
   });
 
-  test("returns HTML content-type", () => {
+  test("returns HTML content-type", async () => {
     const route = createStatsRoute(
       makeStubSessionStats(),
       makeStubDailyTokens(),
       makeStubRepos(),
     );
     const req = new Request("http://localhost/api/stats");
-    const res = route.handle(req, new URL(req.url));
+    const res = await route.handle(req, new URL(req.url));
     expect(res.headers.get("Content-Type")).toContain("text/html");
   });
-  test("returns error HTML on DB failure", () => {
+  test("returns error HTML on DB failure", async () => {
     const sessionStats: SessionStatsService = {
       getSessionStats: () => {
         throw new Error("DB error");
@@ -114,7 +118,7 @@ describe("StatsRoute", () => {
       makeStubRepos(),
     );
     const req = new Request("http://localhost/api/stats");
-    const res = route.handle(req, new URL(req.url));
+    const res = await route.handle(req, new URL(req.url));
     expect(res.status).toBe(200);
   });
 
@@ -134,11 +138,11 @@ describe("StatsRoute", () => {
     );
     const url = new URL("http://localhost/api/stats");
     const req1 = new Request(url.toString());
-    const res1 = route.handle(req1, url);
+    const res1 = await route.handle(req1, url);
     const body1 = await res1.text();
 
     const req2 = new Request(url.toString());
-    const res2 = route.handle(req2, url);
+    const res2 = await route.handle(req2, url);
     const body2 = await res2.text();
 
     expect(callCount).toBe(1);
@@ -214,12 +218,12 @@ describe("PageRoute", () => {
       makeStubRepos(),
     );
     const req = new Request("http://localhost/");
-    const res = route.handle(req, new URL(req.url));
+    const res = await route.handle(req, new URL(req.url));
     const body = await res.text();
     expect(body).toMatch(/^<!DOCTYPE html>/);
   });
 
-  test("returns 500 on DB failure", () => {
+  test("returns 500 on DB failure", async () => {
     const sessionStats: SessionStatsService = {
       getSessionStats: () => {
         throw new Error("DB error");
@@ -234,7 +238,7 @@ describe("PageRoute", () => {
       makeStubRepos(),
     );
     const req = new Request("http://localhost/");
-    const res = route.handle(req, new URL(req.url));
+    const res = await route.handle(req, new URL(req.url));
     expect(res.status).toBe(500);
   });
 
@@ -253,7 +257,7 @@ describe("PageRoute", () => {
       makeStubRepos(),
     );
     const req = new Request("http://localhost/?dir=/proj/a");
-    const res = route.handle(req, new URL(req.url));
+    const res = await route.handle(req, new URL(req.url));
     const body = await res.text();
     expect(receivedDir).toBe("/proj/a");
     expect(body).toContain("selected");
@@ -274,7 +278,7 @@ describe("DirectoriesRoute", () => {
     };
     const route = createDirectoriesRoute(sessionStats);
     const req = new Request("http://localhost/api/directories");
-    const res = route.handle(req, new URL(req.url));
+    const res = await route.handle(req, new URL(req.url));
     expect(res.headers.get("Content-Type")).toContain("application/json");
     const body = await res.json();
     expect(body).toEqual(["/proj/a", "/proj/b"]);
@@ -289,7 +293,7 @@ describe("DirectoriesRoute", () => {
     };
     const route = createDirectoriesRoute(sessionStats);
     const req = new Request("http://localhost/api/directories");
-    const res = route.handle(req, new URL(req.url));
+    const res = await route.handle(req, new URL(req.url));
     const body = await res.json();
     expect(body).toEqual([]);
   });

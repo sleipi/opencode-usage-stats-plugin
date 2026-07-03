@@ -1,4 +1,5 @@
 import type { Repos } from "../../db/repos";
+import { calcBudgetStatus } from "../services/budget-service";
 import type { DailyTokensService } from "../services/daily-tokens-service";
 import type { SessionStatsService } from "../services/session-stats-service";
 import { renderSessionsFragment } from "../templates/sessions-fragment";
@@ -49,6 +50,10 @@ export function createStatsRoute(
         const dailyCost = dailyTokens.getDailyCost();
         const dailyModelCost = dailyTokens.getDailyModelCost();
         const toolGroups = repos.toolCalls.getToolUsageSummary();
+        const budgetSettings = repos.budget.get();
+        const budgetStatus = budgetSettings
+          ? calcBudgetStatus(budgetSettings, costSummary.thisMonth, new Date())
+          : null;
         const html = renderSessionsFragment(
           sessions,
           summary,
@@ -60,6 +65,7 @@ export function createStatsRoute(
           dirFilter,
           dailyCost,
           dailyModelCost,
+          budgetStatus,
         );
 
         cache.set(cacheKey, { html, expiry: now + CACHE_TTL_MS });

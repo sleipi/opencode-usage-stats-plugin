@@ -5,6 +5,7 @@ import type {
 } from "../../db/message/message-repo";
 import type { DailyTokens } from "../../db/shared-types";
 import type { ToolGroupSummary } from "../../db/tool-call/tool-call-repo";
+import type { BudgetStatus } from "../services/budget-service";
 import type { SessionStats } from "../services/types";
 import { renderDailyChart, renderDailyCostChart } from "./daily-chart";
 import { esc } from "./formatters";
@@ -13,7 +14,7 @@ import {
   renderDailyModelCostChart,
 } from "./model-chart";
 import { renderSessionCard } from "./session-card";
-import { renderStatsBar } from "./stats-bar";
+import { renderBudgetBar, renderStatsBar } from "./stats-bar";
 import { renderToolUsage } from "./tool-usage";
 
 export function renderSessionsFragment(
@@ -27,8 +28,10 @@ export function renderSessionsFragment(
   selectedDir?: string,
   dailyCost: DailyTokens[] = [],
   dailyModelCost: DailyModelTokens[] = [],
+  budgetStatus: BudgetStatus | null = null,
 ): string {
   const bar = renderStatsBar(summary, costSummary);
+  const budgetBar = renderBudgetBar(budgetStatus);
   const chart = renderDailyChart(daily);
   const costChart = renderDailyCostChart(dailyCost);
   const modelChart = renderDailyModelChart(dailyModel);
@@ -38,6 +41,7 @@ export function renderSessionsFragment(
   const leftPanel = `
     <div class="left-panel">
       ${bar}
+      ${budgetBar}
       <hr class="section-divider">
       ${chart}
       ${costChart}

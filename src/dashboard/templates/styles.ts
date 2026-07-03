@@ -331,4 +331,84 @@ export const DASHBOARD_CSS = `
     @media (max-width: 1000px) {
       .two-col { flex-direction: column; }
       .left-panel { position: static; }
-    }`;
+    }
+    .mode-budget { color: #a5d6a7; border-color: #388e3c; }
+    .budget-badge {
+      display: inline-block;
+      border: 1px solid;
+      border-radius: 4px;
+      padding: 1px 8px;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .budget-badge--ahead { color: #3fb950; border-color: #238636; }
+    .budget-badge--over  { color: #f0883e; border-color: #d47616; }
+    .budget-badge--on-track { color: #8b949e; border-color: #30363d; }
+    dialog#budget-modal {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      padding: 24px;
+      color: #c9d1d9;
+      font-family: "SF Mono", "Fira Code", "JetBrains Mono", monospace;
+      min-width: 380px;
+      max-width: 480px;
+      margin: auto;
+    }
+    dialog#budget-modal::backdrop {
+      background: rgba(0, 0, 0, 0.6);
+    }
+    .modal-title {
+      font-size: 15px; font-weight: 600; color: #f0f6fc;
+      margin-bottom: 20px;
+    }
+    .modal-field { margin-bottom: 16px; }
+    .modal-label {
+      display: block; font-size: 12px; color: #8b949e;
+      text-transform: uppercase; letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+    .modal-input {
+      background: #0d1117; border: 1px solid #30363d;
+      border-radius: 6px; padding: 8px 12px;
+      color: #f0f6fc; font-family: inherit; font-size: 14px;
+      width: 100%;
+    }
+    .modal-input:focus { outline: none; border-color: #58a6ff; }
+    .day-toggles { display: flex; gap: 6px; }
+    .day-toggle {
+      flex: 1; padding: 6px 0; border-radius: 6px;
+      border: 1px solid #30363d; background: #0d1117;
+      color: #484f58; font-family: inherit; font-size: 12px;
+      cursor: pointer; text-align: center; transition: all 0.15s;
+    }
+    .day-toggle.active {
+      border-color: #1f6feb; background: #1a2d4d; color: #f0f6fc;
+    }
+    .modal-hint { font-size: 11px; color: #484f58; margin-top: 6px; }
+    .modal-muted { color: #8b949e; font-size: 13px; white-space: nowrap; }
+    .period-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .period-input { width: 60px !important; }
+    .modal-actions {
+      display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px;
+    }
+    .btn-cancel {
+      background: transparent; border: 1px solid #30363d;
+      border-radius: 6px; padding: 7px 16px;
+      color: #8b949e; font-family: inherit; font-size: 13px; cursor: pointer;
+    }
+    .btn-cancel:hover { border-color: #484f58; color: #c9d1d9; }
+    .btn-save {
+      background: #238636; border: 1px solid #2ea043;
+      border-radius: 6px; padding: 7px 16px;
+      color: #f0f6fc; font-family: inherit; font-size: 13px; cursor: pointer;
+    }
+    .btn-save:hover { background: #2ea043; }
+    .gear-btn {
+      background: transparent; border: 1px solid #30363d;
+      border-radius: 6px; padding: 3px 10px;
+      color: #8b949e; font-size: 12px; cursor: pointer;
+      line-height: 1; transition: all 0.15s;
+      display: flex; align-items: center; gap: 5px;
+    }
+    .gear-btn:hover { border-color: #484f58; color: #c9d1d9; }`;
